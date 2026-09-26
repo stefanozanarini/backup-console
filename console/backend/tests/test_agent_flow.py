@@ -169,3 +169,35 @@ async def test_offline_worker_skips_pcs(client):
     assert await check_offline_agents() == 1
     problems = (await client.get("/api/v1/problems", headers=as_user())).json()
     assert [(p["check"], p["device_id"]) for p in problems] == [("agent.offline", nas["device_id"])]
+
+
+async def test_auth_config_is_public(client):
+    r = await client.get("/api/v1/auth-config")
+    assert r.status_code == 200 and r.json()["mode"] == "dev"
+
+
+async def test_metrics_history_grouped_by_labels(client):
+    _, site_id = await setup_site(client)
+    data, auth, _, _ = await enroll(client, site_id)
+    await client.post(f"/api/v1/agents/{data['agent_id']}/approve", headers=as_user())
+    for v in (40, 50):
+        await client.post("/agent/v1/metrics", json=disk(v), headers=auth)
+    await client.post("/agent/v1/metrics", json=disk(10, mount="/share/USB"), headers=auth)
+
+    r = await client.get(f"/api/v1/devices/{data['device_id']}/metrics?name=disk.used_pct", headers=as_user())
+    series = {s["labels"]["mount"]: s["points"] for s in r.json()}
+    assert [p[1] for p in series["/share/CACHEDEV1_DATA"]] == [45.0]  # media oraria
+    assert [p[1] for p in series["/share/USB"]] == [10.0]
+
+
+async def test_pending_filter_and_problem_device_filter(client):
+    _, site_id = await setup_site(client)
+    a, _, _, _ = await enroll(client, site_id)
+    b, auth_b, _, _ = await enroll(client, site_id)
+    await client.post(f"/api/v1/agents/{b['agent_id']}/approve", headers=as_user())
+    await client.post("/agent/v1/metrics", json=disk(99), headers=auth_b)
+
+    pending = (await client.get("/api/v1/devices?agent_status=pending", headers=as_user())).json()
+    assert [d["id"] for d in pending] == [a["device_id"]]
+    assert (await client.get(f"/api/v1/problems?device_id={a['device_id']}", headers=as_user())).json() == []
+    assert len((await client.get(f"/api/v1/problems?device_id={b['device_id']}", headers=as_user())).json()) == 1

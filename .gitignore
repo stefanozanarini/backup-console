@@ -11,3 +11,5 @@ agent.json
 /agent/bc-agent.exe
 /agent/dist/
 node_modules/
+dist/
+*.tsbuildinfo

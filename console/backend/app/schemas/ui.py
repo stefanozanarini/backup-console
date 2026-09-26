@@ -72,6 +72,8 @@ class AgentOut(ORM):
     last_seen_at: datetime | None
     last_ip: str | None
     cert_not_after: datetime
+    enrolled_at: datetime
+    approved_at: datetime | None
 
 
 class DeviceOut(ORM):

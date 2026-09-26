@@ -1,6 +1,7 @@
 import secrets
 import uuid
 from datetime import timedelta
+from typing import Any
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -19,6 +20,7 @@ from app.models import (
     Device,
     EnrollmentToken,
     InventorySnapshot,
+    Metric,
     Problem,
     ProblemState,
     RoleAssignment,
@@ -51,6 +53,23 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
 def _scoped(stmt, column, user):
     scope = user.tenant_scope()
     return stmt if scope is None else stmt.where(column.in_(scope))
+
+
+# --- configurazione pubblica per il frontend -----------------------------
+
+
+@router.get("/auth-config")
+async def auth_config() -> dict[str, Any]:
+    """Senza autenticazione: serve al frontend per sapere come fare login."""
+    if settings.auth_mode == "dev":
+        return {"mode": "dev", "agents_url": settings.agents_url}
+    return {
+        "mode": "oidc",
+        "agents_url": settings.agents_url,
+        "client_id": settings.oidc_spa_client_id,
+        "authority": settings.oidc_authority,
+        "scopes": [settings.oidc_scope] if settings.oidc_scope else [],
+    }
 
 
 # --- utenti ---------------------------------------------------------------
@@ -148,13 +167,19 @@ async def create_enrollment_token(
 
 @router.get("/devices", response_model=list[DeviceOut])
 async def list_devices(
-    user: CurrentUserDep, session: SessionDep, tenant_id: uuid.UUID | None = None, kind: str | None = None
+    user: CurrentUserDep,
+    session: SessionDep,
+    tenant_id: uuid.UUID | None = None,
+    kind: str | None = None,
+    agent_status: AgentStatus | None = None,
 ):
     stmt = _scoped(select(Device), Device.tenant_id, user).options(selectinload(Device.agent))
     if tenant_id:
         stmt = stmt.where(Device.tenant_id == tenant_id)
     if kind:
         stmt = stmt.where(Device.kind == kind)
+    if agent_status:
+        stmt = stmt.join(Agent, Agent.device_id == Device.id).where(Agent.status == agent_status)
     return (await session.scalars(stmt.order_by(Device.name))).all()
 
 
@@ -174,6 +199,39 @@ async def get_device(device_id: uuid.UUID, user: CurrentUserDep, session: Sessio
     if snap:
         out.inventory, out.inventory_at = snap.data, snap.collected_at
     return out
+
+
+@router.get("/devices/{device_id}/metrics")
+async def device_metrics(
+    device_id: uuid.UUID,
+    name: str,
+    user: CurrentUserDep,
+    session: SessionDep,
+    hours: int = Query(24 * 7, ge=1, le=24 * 90),
+):
+    """Serie storica di una metrica, media oraria, raggruppata per label (es. per volume)."""
+    device = await session.get(Device, device_id)
+    if device is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "non trovato")
+    user.require_read(device.tenant_id)
+    bucket = func.date_trunc("hour", Metric.ts).label("bucket")
+    rows = (
+        await session.execute(
+            select(Metric.labels, bucket, func.avg(Metric.value))
+            .where(
+                Metric.device_id == device_id,
+                Metric.name == name,
+                Metric.ts >= utcnow() - timedelta(hours=hours),
+            )
+            .group_by(Metric.labels, bucket)
+            .order_by(bucket)
+        )
+    ).all()
+    series: dict[str, dict[str, Any]] = {}
+    for labels, ts, value in rows:
+        key = ",".join(f"{k}={v}" for k, v in sorted(labels.items()))
+        series.setdefault(key, {"labels": labels, "points": []})["points"].append([ts, float(value)])
+    return list(series.values())
 
 
 async def _set_agent_status(
@@ -213,6 +271,7 @@ async def list_problems(
     user: CurrentUserDep,
     session: SessionDep,
     tenant_id: uuid.UUID | None = None,
+    device_id: uuid.UUID | None = None,
     state: Annotated[list[ProblemState] | None, Query()] = None,
     severity: Severity | None = None,
     limit: int = Query(200, le=1000),
@@ -229,6 +288,8 @@ async def list_problems(
     )
     if tenant_id:
         stmt = stmt.where(Problem.tenant_id == tenant_id)
+    if device_id:
+        stmt = stmt.where(Problem.device_id == device_id)
     if severity:
         stmt = stmt.where(Problem.severity == severity)
     rows = (await session.execute(stmt)).all()

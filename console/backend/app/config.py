@@ -20,6 +20,12 @@ class Settings(BaseSettings):
     oidc_issuer: str = ""  # es. https://login.microsoftonline.com/<tenant-id>/v2.0
     oidc_audience: str = ""  # client id / Application ID URI dell'API
     oidc_jwks_url: str = ""  # es. https://login.microsoftonline.com/<tenant-id>/discovery/v2.0/keys
+    # Per il frontend (MSAL): app registration SPA e scope dell'API.
+    oidc_spa_client_id: str = ""
+    oidc_authority: str = ""  # es. https://login.microsoftonline.com/<tenant-id>
+    oidc_scope: str = ""  # es. api://backup-console/access
+    # URL pubblico dell'endpoint agenti, mostrato nei comandi di installazione.
+    agents_url: str = ""
 
     enroll_token_ttl_hours: int = 24
     agent_offline_after_s: int = 300
