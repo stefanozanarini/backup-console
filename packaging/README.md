@@ -1,4 +1,4 @@
-# Packaging (da fare)
+# Packaging
 
 ## QPKG (QNAP) – `qpkg/`
 
@@ -11,7 +11,8 @@ Un pacchetto per architettura, costruito con il QDK ufficiale QNAP in un contain
 | `BackupConsoleAgent_<ver>_arm-x41.qpkg` | Annapurna AL-314/AL-212 (TS-x31P/X, x31+) |
 | `BackupConsoleAgent_<ver>_arm-x31.qpkg` | ARMv7 meno recenti (TS-x31) |
 
-I vecchi ARMv5 (`arm-x19`, TS-x19/x20/x21) non sono supportati. Se non sai quale
+La corrispondenza modello → architettura è indicativa: va verificata sul NAS. I vecchi
+ARMv5 (`arm-x19`, TS-x19/x20/x21) non sono supportati. Se non sai quale
 scegliere, via SSH `uname -m` (`x86_64`, `aarch64`, `armv7l`) e `getcfg System Platform
 -f /etc/config/uLinux.conf`.
 
