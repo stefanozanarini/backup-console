@@ -98,7 +98,7 @@ nano .env
 ```
 
 In `.env` impostare:
-- `BC_VERSION`: la versione da installare, cioè il numero del tag `console-vX.Y.Z` su GitHub;
+- `BC_VERSION`: la versione da installare, cioè il numero del tag `console-backup-vX.Y.Z` su GitHub;
 - `BC_PUBLIC_URL`;
 - `POSTGRES_PASSWORD` e `BC_PROXY_SECRET`;
 - le variabili Entra ID (vedi il passo 8).
@@ -205,8 +205,8 @@ Poi:
 
 ## 10. Aggiornamenti
 
-**Rilascio**, da GitHub: si crea un tag `console-vX.Y.Z` sul commit da rilasciare, per esempio
-`git tag console-v0.3.0 && git push origin console-v0.3.0`. La CI esegue i test e pubblica le
+**Rilascio**, da GitHub: si crea un tag `console-backup-vX.Y.Z` sul commit da rilasciare, per esempio
+`git tag console-backup-v0.3.0 && git push origin console-backup-v0.3.0`. La CI esegue i test e pubblica le
 immagini `:X.Y.Z` e `:latest` su GHCR. I push su `main` producono solo `:main`, che non va usato
 in produzione.
 

@@ -2,7 +2,7 @@
 # Deploy della Backup Console sulla VM (da lanciare come utente del gruppo docker).
 #
 #   ./deploy.sh                    aggiorna i file di configurazione e riavvia la versione in .env
-#   ./deploy.sh --version 0.3.0    passa alla versione 0.3.0 (tag console-v0.3.0)
+#   ./deploy.sh --version 0.3.0    passa alla versione 0.3.0 (tag console-backup-v0.3.0)
 #   ./deploy.sh --version 0.2.0    ...e allo stesso modo si torna a una versione precedente
 #   ./deploy.sh --edge             aggiorna anche lo stack edge (nginx + certbot)
 #
