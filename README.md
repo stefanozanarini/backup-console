@@ -6,8 +6,10 @@ Veeam Agent, con agenti che si collegano solo in uscita. Architettura e decision
 
 ```
 console/backend   FastAPI + SQLAlchemy + Alembic
-console/deploy    docker-compose, Caddyfile (prod e dev)
-console/frontend  React + Vite (servito da Caddy)
+console/deploy    docker-compose dello stack della console
+console/frontend  React + Vite (servito da nginx nel container frontend)
+edge/             nginx di bordo + certbot, condiviso con altre app della VM
+docs/             guida di installazione su VM Azure
 agent/            bc-agent in Go (QNAP, Windows)
 packaging/        QPKG (QNAP); MSI da fare
 ```
@@ -29,47 +31,51 @@ BC_DATABASE_URL=postgresql+asyncpg://bc:bc@127.0.0.1:55432/bc .venv/bin/alembic 
 
 ## Stack completo in locale
 
+Stessa struttura della VM (stack `edge` con nginx più stack della console), sulle porte
+18080/18443 e con un certificato di test per `backup-console.localhost`.
+
 ```bash
-cd console/deploy
-cp .env.example .env
+docker network create proxy-dev
+mkdir -p ~/bcdata && docker run --rm -v ~/bcdata:/d alpine sh -c "mkdir -p /d/ca && chown 10001:10001 /d/ca"
 ```
 
-Poi in `.env` impostare:
+`console/deploy/.env` (partendo da `.env.example`):
 
 ```
-CONSOLE_HOST=console.localhost
-AGENTS_HOST=agents.localhost
-AGENTS_URL_PORT=:18443
+BC_PUBLIC_URL=https://backup-console.localhost:18443
 BC_AUTH_MODE=dev
-CADDYFILE=Caddyfile.dev
+BC_DATA_DIR=/home/<utente>/bcdata
+PROXY_NETWORK=proxy-dev
 BACKEND_IMAGE=backup-console-backend:dev
-CADDY_IMAGE=backup-console-caddy:dev
-HTTPS_PORT=18443
+FRONTEND_IMAGE=backup-console-frontend:dev
+POSTGRES_PASSWORD=…
+BC_PROXY_SECRET=…
+```
+
+`edge/.env`:
+
+```
+BC_HOSTNAMES=backup-console.localhost
+BC_DATA_DIR=/home/<utente>/bcdata
+PROXY_NETWORK=proxy-dev
 HTTP_PORT=18080
+HTTPS_PORT=18443
+BC_PROXY_SECRET=…
 ```
 
-Quindi:
+`BC_PROXY_SECRET` deve avere lo stesso valore nei due file.
 
 ```bash
-docker compose up -d --build
-docker compose exec api python -m app.cli create-user tu@azienda.it
-docker compose exec api python -m app.cli create-tenant "Cliente Demo" demo
-docker compose exec api python -m app.cli create-site demo "Sede principale"
-docker compose exec api python -m app.cli create-token demo "Sede principale"
-docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt ./caddy-root.crt
+(cd console/deploy && docker compose up -d --build)
+(cd edge && ./certs.sh selfsigned backup-console backup-console.localhost && docker compose up -d)
+(cd console/deploy && docker compose exec api python -m app.cli create-user tu@azienda.it)
+console/backend/.venv/bin/python console/deploy/dev/seed_demo.py --ca edge/dev-ca.crt   # dati di esempio
 ```
 
-Dati di esempio (8 dispositivi su 3 tenant, passando dagli endpoint reali):
-
-```bash
-console/backend/.venv/bin/python console/deploy/dev/seed_demo.py --ca console/deploy/caddy-root.crt
-```
-
-La console è su `https://console.localhost:18443`. Per lo sviluppo del frontend con
-ricarica automatica vedi [console/frontend/README.md](console/frontend/README.md).
-
+La console è su `https://backup-console.localhost:18443`: la CA di test è in `edge/dev-ca.crt`.
 Con `BC_AUTH_MODE=dev` l'API accetta l'header `X-Dev-User: <email>` al posto del token
-Entra ID. Documentazione OpenAPI su `https://console.localhost:18443/docs`.
+Entra ID. Per il frontend con ricarica automatica vedi
+[console/frontend/README.md](console/frontend/README.md).
 
 ## Agente
 
@@ -84,7 +90,7 @@ GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 go build -o bc-agent ./cmd/bc-agent
 Enrollment e avvio:
 
 ```bash
-bc-agent enroll -config ./agent.json -server https://agents.localhost:18443 -token <TOKEN> -server-ca caddy-root.crt
+bc-agent enroll -config ./agent.json -server https://backup-console.localhost:18443 -token <TOKEN> -server-ca edge/dev-ca.crt
 ```
 
 Approvare l'agente da console (`POST /api/v1/agents/{id}/approve`), poi:
@@ -157,14 +163,4 @@ piattaforma).
 
 ## Produzione (VM Azure)
 
-1. VM Ubuntu 24.04 con Docker. Nell'NSG aprire solo la 443 (più la 80 per la challenge ACME).
-2. Creare i record DNS `console.<dominio>` e `agents.<dominio>` verso l'IP della VM.
-3. In `console/deploy/.env` impostare host, password DB, parametri Entra ID e `BACKEND_IMAGE` da GHCR.
-4. Avviare lo stack:
-   ```bash
-   docker compose up -d
-   ```
-5. Creare il primo superadmin:
-   ```bash
-   docker compose exec api python -m app.cli create-user <email>
-   ```
+Guida completa, dalla VM appena creata alla console online: [docs/deploy-azure.md](docs/deploy-azure.md).

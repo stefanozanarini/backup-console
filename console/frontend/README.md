@@ -4,8 +4,8 @@ SPA React + Vite + TypeScript. Login Entra ID con MSAL (oppure utente di svilupp
 `BC_AUTH_MODE=dev`). La configurazione di login arriva a runtime da
 `GET /api/v1/auth-config`, quindi la stessa build va bene per ogni ambiente.
 
-In produzione la build è inclusa nell'immagine Caddy (`Dockerfile`) e servita
-sull'host `console.<dominio>`.
+In produzione la build è servita da un nginx non privilegiato nel container `frontend`
+(`Dockerfile`, `nginx.conf`). L'nginx di bordo (`edge/`) ci instrada `/`.
 
 ## Pagine
 
@@ -21,7 +21,7 @@ Con lo stack compose di sviluppo avviato (vedi README principale):
 
 ```bash
 npm install
-BC_API_URL=https://console.localhost:18443 npm run dev
+BC_API_URL=https://backup-console.localhost:18443 npm run dev
 ```
 
-Dati di esempio: `console/backend/.venv/bin/python console/deploy/dev/seed_demo.py --ca caddy-root.crt`.
+Dati di esempio: `console/backend/.venv/bin/python console/deploy/dev/seed_demo.py --ca edge/dev-ca.crt`.

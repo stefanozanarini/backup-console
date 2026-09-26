@@ -1,0 +1,23 @@
+# Esempio per un'altra applicazione in container. Per attivarlo:
+#   1. copiare in templates/<app>.conf.template e adattare nomi e alias;
+#   2. aggiungere la variabile del nome host in docker-compose.yml (environment);
+#   3. collegare il container dell'app alla rete "proxy" con un alias univoco;
+#   4. ottenere il certificato: ./certs.sh issue <app> <email> <nome-host>
+#   5. docker compose up -d --force-recreate nginx
+#
+# server {
+#     listen 443 ssl;
+#     listen [::]:443 ssl;
+#     http2 on;
+#     server_name ${APP_HOSTNAME};
+#
+#     ssl_certificate     /etc/letsencrypt/live/<app>/fullchain.pem;
+#     ssl_certificate_key /etc/letsencrypt/live/<app>/privkey.pem;
+#     add_header Strict-Transport-Security "max-age=31536000" always;
+#
+#     set $app http://<alias-container>:<porta>;
+#     location / {
+#         include snippets/proxy.conf;
+#         proxy_pass $app;
+#     }
+# }

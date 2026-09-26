@@ -1,0 +1,39 @@
+# Impostazioni comuni a tutti i siti (contesto http).
+server_tokens off;
+
+ssl_protocols TLSv1.2 TLSv1.3;
+ssl_prefer_server_ciphers off;
+ssl_session_cache shared:SSL:10m;
+ssl_session_timeout 1d;
+ssl_session_tickets off;
+
+# DNS interno di Docker: i nomi dei container si risolvono a ogni richiesta, così
+# nginx parte (e resta su) anche se un'applicazione è ferma.
+resolver 127.0.0.11 valid=30s ipv6=off;
+
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+# Porta 80: challenge Let's Encrypt e redirect a HTTPS per tutti i nomi.
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# Nomi non configurati su 443: rifiuta l'handshake (nessun certificato esposto).
+server {
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    server_name _;
+    ssl_reject_handshake on;
+}

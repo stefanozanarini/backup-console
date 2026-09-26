@@ -17,9 +17,9 @@ connessione. Nei siti non si apre nessuna porta in ingresso.
 ```
  SITI (nessuna porta in ingresso)                AZURE VM (docker compose)
 ┌──────────────────────────┐                 ┌───────────────────────────────┐
-│ QNAP  → bc-agent (QPKG)  │── HTTPS mTLS ──▶│ caddy :443                    │
-│ VBR   → bc-agent (MSI)   │────────────────▶│  agents.<dominio> → mTLS      │
-│ PC    → bc-agent (MSI)   │────────────────▶│  console.<dominio> → Entra ID │
+│ QNAP  → bc-agent (QPKG)  │── HTTPS mTLS ──▶│ nginx :443 (stack edge)       │
+│ VBR   → bc-agent (exe)   │────────────────▶│  /agent/v1 → mTLS facoltativo │
+│ PC    → bc-agent (exe)   │────────────────▶│  /, /api   → Entra ID         │
 └──────────────────────────┘                 │        │                      │
                                              │   api (FastAPI) ── worker     │
                                              │        │                      │
@@ -34,8 +34,8 @@ connessione. Nei siti non si apre nessuna porta in ingresso.
 | Backend | Python 3.12, FastAPI, SQLAlchemy 2 (async), Alembic | `console/backend` |
 | Worker | stesso codice, `python -m app.worker` | offline check; poi notifiche, retention |
 | DB | PostgreSQL 16 | metriche in tabella semplice, partizionamento quando serve |
-| Reverse proxy | Caddy 2.8 | Let's Encrypt, mTLS agenti, header di sicurezza |
-| Frontend | React + Vite + TypeScript, build inclusa nell'immagine Caddy | `console/frontend` |
+| Reverse proxy | nginx 1.27 in container (stack `edge/`, condiviso con altre app) + certbot | Let's Encrypt, mTLS agenti; guida: `docs/deploy-azure.md` |
+| Frontend | React + Vite + TypeScript, servito da nginx non privilegiato | `console/frontend` |
 | Agente | Go, binario statico senza dipendenze | `agent/` |
 | Pacchetti | QPKG (QDK) per QNAP, MSI (WiX v5) per Windows | `packaging/` |
 | CI/CD | GitHub Actions, immagini su GHCR | `.github/workflows` |
@@ -59,15 +59,25 @@ ovunque ed è facile da impacchettare come QPKG e MSI.
 3. La CA agenti interna firma il certificato con **CN = agent_id** (il subject richiesto viene ignorato).
 4. L'agente resta `pending` finché un operatore non lo **approva**, anche in blocco. Il passo
    manuale evita che un token trapelato permetta di registrare macchine estranee.
-5. Caddy verifica il certificato contro `agent-ca.crt` e passa al backend il fingerprint
-   SHA-256 nell'header `X-Client-Cert-Fingerprint`, sovrascrivendo sempre quello inviato
-   dal client. Il backend cerca l'agente per fingerprint, quindi la **revoca** ha effetto
-   immediato senza bisogno di CRL.
+5. nginx chiede il certificato client in modo facoltativo (`ssl_verify_client optional`)
+   e lo verifica contro `agent-ca.crt`. Sulle location `/agent/v1/` inoltra all'api:
+   - `X-Client-Verify` (esito della verifica);
+   - `X-Client-Cert` (il certificato);
+   - `X-Proxy-Secret`, un segreto condiviso che dimostra che la richiesta arriva da nginx e
+     non da un altro container della rete condivisa.
+
+   nginx sovrascrive sempre questi header, così un client non può iniettarli. Il backend
+   calcola la SHA-256 del certificato e cerca l'agente per impronta, quindi la **revoca** ha
+   effetto immediato senza bisogno di CRL.
 
 Altre misure:
-- il container `api` non pubblica porte;
-- l'host `console.` risponde 404 su `/agent/*` e scarta l'header del fingerprint;
-- la chiave della CA sta solo nel volume `agent_ca` (Caddy lo monta in sola lettura e legge solo il `.crt`).
+- console e agenti stanno sullo stesso nome host (`backup-console.agsmedia.it`); su `/api`
+  nginx azzera gli header del certificato;
+- i container della console non pubblicano porte: si raggiungono solo attraverso nginx sulla
+  rete `proxy`;
+- `X-Forwarded-For` viene impostato da nginx con l'IP reale e non accoda valori del client;
+- la CA sta in `/srv/backup-console/ca` sull'host: nginx la monta in sola lettura e legge solo
+  il `.crt`, la chiave è in `0600`.
 
 ### Utenti e tenant
 

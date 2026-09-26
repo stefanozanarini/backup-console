@@ -1,5 +1,7 @@
-# Console Backup: docker compose --env-file .env up -d
-# Solo Caddy espone porte; api, worker e db stanno sulla rete interna.
+# Stack della Backup Console. Nessuna porta esposta: il traffico arriva dall'nginx di
+# bordo (edge/) attraverso la rete Docker condivisa "proxy".
+#
+#   docker compose --env-file .env up -d
 name: backup-console
 
 x-backend: &backend
@@ -16,9 +18,13 @@ x-backend: &backend
     BC_OIDC_SPA_CLIENT_ID: ${BC_OIDC_SPA_CLIENT_ID:-}
     BC_OIDC_AUTHORITY: ${BC_OIDC_AUTHORITY:-}
     BC_OIDC_SCOPE: ${BC_OIDC_SCOPE:-}
-    BC_AGENTS_URL: https://${AGENTS_HOST}${AGENTS_URL_PORT:-}
+    BC_RELEASE_PUBLIC_KEY: ${BC_RELEASE_PUBLIC_KEY:-}
+    BC_AGENTS_URL: ${BC_PUBLIC_URL:?imposta BC_PUBLIC_URL}
+    BC_PROXY_SECRET: ${BC_PROXY_SECRET:?imposta BC_PROXY_SECRET (stesso valore dello stack edge)}
   volumes:
-    - agent_ca:/data/ca
+    # CA degli agenti in una directory dell'host: l'nginx di bordo la monta in sola
+    # lettura per verificare i certificati client (legge solo agent-ca.crt).
+    - ${BC_DATA_DIR:-/srv/backup-console}/ca:/data/ca
     - releases:/data/releases
   networks: [internal]
 
@@ -39,8 +45,7 @@ services:
       retries: 20
     networks: [internal]
 
-  # Migrazioni + creazione CA agenti, poi termina. Caddy parte solo dopo,
-  # perché ha bisogno di agent-ca.crt per verificare i certificati client.
+  # Migrazioni + creazione CA agenti e chiave dei segreti, poi termina.
   init:
     <<: *backend
     restart: "no"
@@ -52,8 +57,10 @@ services:
     <<: *backend
     depends_on:
       init: { condition: service_completed_successfully }
-    # "public" solo per l'uscita verso Entra ID (JWKS): nessuna porta pubblicata.
-    networks: [internal, public]
+    networks:
+      internal: {}
+      # Nome univoco sulla rete condivisa con le altre applicazioni della VM.
+      proxy: { aliases: [backup-console-api] }
 
   worker:
     <<: *backend
@@ -61,35 +68,20 @@ services:
     depends_on:
       init: { condition: service_completed_successfully }
 
-  # Caddy + build del frontend (console/frontend/Dockerfile).
-  caddy:
-    image: ${CADDY_IMAGE:-ghcr.io/stefanozanarini/backup-console-caddy:latest}
+  frontend:
+    image: ${FRONTEND_IMAGE:-ghcr.io/stefanozanarini/backup-console-frontend:latest}
     build: ../frontend
     restart: unless-stopped
-    ports:
-      - "${HTTP_PORT:-80}:80"
-      - "${HTTPS_PORT:-443}:443"
-    environment:
-      CONSOLE_HOST: ${CONSOLE_HOST:?imposta CONSOLE_HOST}
-      AGENTS_HOST: ${AGENTS_HOST:?imposta AGENTS_HOST}
-      ACME_EMAIL: ${ACME_EMAIL:-}
-    volumes:
-      - ./${CADDYFILE:-Caddyfile}:/etc/caddy/Caddyfile:ro
-      - agent_ca:/ca:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      init: { condition: service_completed_successfully }
-    networks: [internal, public]
+    networks:
+      proxy: { aliases: [backup-console-web] }
 
 volumes:
   pgdata:
   releases:
-  agent_ca:
-  caddy_data:
-  caddy_config:
 
 networks:
   internal:
     internal: true
-  public:
+  proxy:
+    external: true
+    name: ${PROXY_NETWORK:-proxy}

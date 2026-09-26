@@ -1,4 +1,4 @@
-# Immagine Caddy con la build del frontend inclusa (servita da /srv/frontend).
+# Build del frontend servita da nginx non privilegiato (porta 8080, utente 101).
 FROM node:22-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
@@ -6,5 +6,7 @@ RUN npm ci --no-audit --no-fund
 COPY . .
 RUN npm run build
 
-FROM caddy:2.8-alpine
-COPY --from=build /app/dist /srv/frontend
+FROM nginxinc/nginx-unprivileged:1.27-alpine
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY security-headers.conf /etc/nginx/snippets/security-headers.conf
+COPY --from=build /app/dist /usr/share/nginx/html

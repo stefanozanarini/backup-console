@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     db_pool: bool = True
 
     # Directory della CA che firma i certificati client degli agenti.
-    # Caddy legge solo agent-ca.crt; la chiave resta al backend.
+    # nginx legge solo agent-ca.crt; la chiave resta al backend.
     ca_dir: str = "/data/ca"
     agent_cert_days: int = 365
 
@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     release_public_key: str = ""
     elevation_minutes: int = 15
     command_poll_wait_s: int = 25
+
+    # Segreto condiviso con l'nginx di bordo (header X-Proxy-Secret sulle location
+    # /agent/v1/): senza, gli header del certificato client vengono ignorati. Protegge
+    # da altri container sulla rete "proxy" che chiamino l'api direttamente.
+    proxy_secret: str = ""
 
     enroll_token_ttl_hours: int = 24
     agent_offline_after_s: int = 300

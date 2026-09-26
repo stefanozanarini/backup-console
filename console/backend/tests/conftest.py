@@ -71,3 +71,10 @@ def make_csr(cn: str = "ignored") -> str:
 
 def cert_fingerprint(cert_pem: str) -> str:
     return fingerprint(x509.load_pem_x509_certificate(cert_pem.encode()))
+
+
+def agent_headers(cert_pem: str) -> dict[str, str]:
+    """Gli header che nginx aggiunge dopo aver verificato il certificato client."""
+    from urllib.parse import quote
+
+    return {"X-Client-Verify": "SUCCESS", "X-Client-Cert": quote(cert_pem, safe="")}

@@ -1,20 +1,34 @@
-import re
+import hmac
 from typing import Annotated
+from urllib.parse import unquote
 
+from cryptography import x509
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.db import get_session
 from app.models import Agent, AgentStatus
-from app.services.ca import AgentCA
+from app.services.ca import AgentCA, fingerprint
 
-# Impostato da Caddy dopo aver verificato il certificato client contro la CA agenti.
-# Caddy sovrascrive sempre questo header, e il container api non è esposto:
-# un client non può quindi iniettarlo.
-FINGERPRINT_HEADER = "x-client-cert-fingerprint"
-FINGERPRINT_RE = re.compile(r"[0-9a-f]{64}")
+# Impostati da nginx sulle location /agent/v1/ (proxy_set_header, quindi sempre
+# sovrascritti: un client non può iniettarli) dopo la verifica del certificato
+# client contro la CA degli agenti:
+#   X-Client-Verify = $ssl_client_verify        (SUCCESS / NONE / FAILED:...)
+#   X-Client-Cert   = $ssl_client_escaped_cert  (PEM url-encoded)
+# L'impronta SHA-256 la calcoliamo qui: nginx espone solo SHA-1.
+# Il container api non è esposto: si raggiunge solo passando da nginx.
+VERIFY_HEADER = "x-client-verify"
+CERT_HEADER = "x-client-cert"
+PROXY_SECRET_HEADER = "x-proxy-secret"
+
+
+def _from_proxy(request: Request) -> bool:
+    if not settings.proxy_secret:
+        return True
+    return hmac.compare_digest(request.headers.get(PROXY_SECRET_HEADER, ""), settings.proxy_secret)
 
 
 def get_ca(request: Request) -> AgentCA:
@@ -24,10 +38,13 @@ def get_ca(request: Request) -> AgentCA:
 async def get_agent(
     request: Request, session: Annotated[AsyncSession, Depends(get_session)]
 ) -> Agent:
-    fp = request.headers.get(FINGERPRINT_HEADER, "").strip().lower().replace(":", "")
-    # Senza certificato client il valore non è un hash valido: lo trattiamo come assente.
-    if not FINGERPRINT_RE.fullmatch(fp):
+    pem = unquote(request.headers.get(CERT_HEADER, ""))
+    if not _from_proxy(request) or request.headers.get(VERIFY_HEADER) != "SUCCESS" or "BEGIN CERTIFICATE" not in pem:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "certificato client mancante")
+    try:
+        fp = fingerprint(x509.load_pem_x509_certificate(pem.encode()))
+    except ValueError as e:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "certificato client non valido") from e
     agent = await session.scalar(
         select(Agent).where(Agent.cert_fingerprint == fp).options(selectinload(Agent.device))
     )

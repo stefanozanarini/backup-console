@@ -1,10 +1,12 @@
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.x509.oid import NameOID
 
-from app.api.agent.deps import FINGERPRINT_HEADER
-from tests.conftest import as_user, cert_fingerprint, make_csr
+from tests.conftest import agent_headers, as_user, make_csr
 
 
 def now() -> str:
@@ -31,7 +33,7 @@ async def enroll(client, site_id, roles=("qnap",)):
     r = await client.post("/agent/v1/enroll", json=body)
     assert r.status_code == 200, r.text
     data = r.json()
-    return data, {FINGERPRINT_HEADER: cert_fingerprint(data["cert_pem"])}, token, body
+    return data, agent_headers(data["cert_pem"]), token, body
 
 
 def envelope(payload):
@@ -69,13 +71,27 @@ async def test_pending_agent_cannot_send_data_until_approved(client):
 
 
 async def test_unknown_or_missing_certificate_is_rejected(client):
+    _, site_id = await setup_site(client)
+    _, auth, _, _ = await enroll(client, site_id)
+
     r = await client.post("/agent/v1/heartbeat", json={"version": "x"})
-    assert r.status_code == 401
-    r = await client.post("/agent/v1/heartbeat", json={"version": "x"}, headers={FINGERPRINT_HEADER: "ab" * 32})
-    assert r.status_code == 401
-    # Placeholder non risolto o valore arbitrario: trattato come certificato assente.
-    r = await client.post("/agent/v1/heartbeat", json={"version": "x"}, headers={FINGERPRINT_HEADER: "{tls.client}"})
     assert r.json()["detail"] == "certificato client mancante"
+    # Certificato presente ma verifica di nginx fallita (o assente): rifiutato.
+    for verify in ("NONE", "FAILED:certificate has expired", ""):
+        r = await client.post("/agent/v1/heartbeat", json={"version": "x"}, headers={**auth, "X-Client-Verify": verify})
+        assert r.status_code == 401 and r.json()["detail"] == "certificato client mancante"
+    r = await client.post("/agent/v1/heartbeat", json={"version": "x"},
+                          headers={"X-Client-Verify": "SUCCESS", "X-Client-Cert": "-----BEGIN CERTIFICATE-----%0Axx"})
+    assert r.json()["detail"] == "certificato client non valido"
+    # Certificato ben formato ma di un agente mai registrato.
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "estraneo")])
+    other = (x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(key.public_key())
+             .serial_number(1).not_valid_before(datetime.now(UTC)).not_valid_after(datetime.now(UTC) + timedelta(days=1))
+             .sign(key, hashes.SHA256()).public_bytes(serialization.Encoding.PEM).decode())
+    r = await client.post("/agent/v1/heartbeat", json={"version": "x"}, headers=agent_headers(other))
+    assert r.json()["detail"] == "agente sconosciuto"
+    assert (await client.post("/agent/v1/heartbeat", json={"version": "x"}, headers=auth)).status_code == 200
 
 
 async def test_disk_threshold_opens_escalates_and_resolves_problem(client):
@@ -201,3 +217,18 @@ async def test_pending_filter_and_problem_device_filter(client):
     assert [d["id"] for d in pending] == [a["device_id"]]
     assert (await client.get(f"/api/v1/problems?device_id={a['device_id']}", headers=as_user())).json() == []
     assert len((await client.get(f"/api/v1/problems?device_id={b['device_id']}", headers=as_user())).json()) == 1
+
+
+async def test_client_cert_headers_require_proxy_secret(client, monkeypatch):
+    from app.config import settings
+
+    _, site_id = await setup_site(client)
+    _, auth, _, _ = await enroll(client, site_id)
+    monkeypatch.setattr(settings, "proxy_secret", "s3greto-condiviso")
+    # Un container sulla rete "proxy" che chiama l'api direttamente, senza passare da nginx.
+    r = await client.post("/agent/v1/heartbeat", json={"version": "x"}, headers=auth)
+    assert r.json()["detail"] == "certificato client mancante"
+    r = await client.post("/agent/v1/heartbeat", json={"version": "x"}, headers={**auth, "X-Proxy-Secret": "sbagliato"})
+    assert r.status_code == 401
+    r = await client.post("/agent/v1/heartbeat", json={"version": "x"}, headers={**auth, "X-Proxy-Secret": "s3greto-condiviso"})
+    assert r.status_code == 200

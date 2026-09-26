@@ -1,6 +1,6 @@
 """CA interna che firma i certificati client (mTLS) degli agenti.
 
-Caddy verifica la catena con agent-ca.crt; il backend identifica poi l'agente
+nginx verifica la catena con agent-ca.crt; il backend identifica poi l'agente
 tramite il fingerprint del certificato, per cui la revoca ha effetto immediato
 senza bisogno di CRL.
 """

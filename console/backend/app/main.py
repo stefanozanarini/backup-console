@@ -13,7 +13,7 @@ from app.services.ca import AgentCA
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     ca = AgentCA(settings.ca_dir)
-    # In produzione la CA è creata dal servizio "init" prima che parta Caddy.
+    # In produzione la CA è creata dal servizio "init", prima che parta nginx.
     ca.ensure()
     secrets.ensure_key()
     app.state.ca = ca

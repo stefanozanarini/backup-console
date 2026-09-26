@@ -49,7 +49,8 @@ class Agent(UUIDPk, Base):
 
     device_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("devices.id", ondelete="CASCADE"), unique=True)
     status: Mapped[str] = mapped_column(String(16), default=AgentStatus.PENDING)
-    # SHA-256 (hex) del certificato client; Caddy lo passa nell'header X-Client-Cert-Fingerprint.
+    # SHA-256 (hex) del certificato client; calcolato dal certificato che nginx inoltra
+    # dopo averlo verificato (vedi api/agent/deps.py).
     cert_fingerprint: Mapped[str] = mapped_column(String(64), unique=True)
     cert_not_after: Mapped[datetime]
     version: Mapped[str | None] = mapped_column(String(64))

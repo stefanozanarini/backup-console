@@ -81,6 +81,6 @@ jobs:
           context: console/frontend
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/backup-console-caddy:latest
-            ghcr.io/${{ github.repository_owner }}/backup-console-caddy:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/backup-console-frontend:latest
+            ghcr.io/${{ github.repository_owner }}/backup-console-frontend:${{ github.sha }}
       # TODO: job di deploy sulla VM (SSH con chiave limitata a "docker compose pull && up -d")

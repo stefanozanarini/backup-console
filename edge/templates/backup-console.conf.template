@@ -1,0 +1,69 @@
+# Backup Console: interfaccia, API e agenti sullo stesso nome host.
+#   /agent/v1/  → api, con il certificato client (mTLS) verificato qui
+#   /api/, /docs, /openapi.json → api (utenti, login Entra ID)
+#   /           → frontend statico
+
+# Limite su enrollment e download con token (per IP).
+limit_req_zone $binary_remote_addr zone=bc_enroll:10m rate=20r/m;
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name ${BC_HOSTNAMES};
+
+    ssl_certificate     /etc/letsencrypt/live/backup-console/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/backup-console/privkey.pem;
+
+    # Certificato client facoltativo: gli agenti lo presentano, i browser no (nessun
+    # utente ha certificati di questa CA, quindi non compare nessuna richiesta).
+    # Un certificato presentato ma non valido viene rifiutato da nginx con 400.
+    ssl_client_certificate /etc/nginx/backup-console-ca/agent-ca.crt;
+    ssl_verify_client optional;
+    ssl_verify_depth 1;
+
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+    # Nomi (alias) dei container sulla rete "proxy".
+    set $bc_api http://backup-console-api:8000;
+    set $bc_web http://backup-console-web:8080;
+    set $bc_proxy_secret "${BC_PROXY_SECRET}";
+
+    # --- agenti -------------------------------------------------------------
+    location ~ ^/agent/v1/(enroll|download/) {
+        limit_req zone=bc_enroll burst=30 nodelay;
+        include snippets/backup-console-agent.conf;
+    }
+    location /agent/v1/ {
+        include snippets/backup-console-agent.conf;
+    }
+    location /agent/ {
+        return 404;
+    }
+
+    # --- utenti -------------------------------------------------------------
+    location /api/ {
+        include snippets/proxy.conf;
+        # Gli header del certificato client esistono solo per /agent/v1/.
+        proxy_set_header X-Client-Verify "";
+        proxy_set_header X-Client-Cert   "";
+        proxy_set_header X-Proxy-Secret  "";
+        # Caricamento dei rilasci (binari + QPKG).
+        client_max_body_size 300m;
+        proxy_request_buffering off;
+        proxy_read_timeout 300s;
+        proxy_pass $bc_api;
+    }
+    location ~ ^/(docs|openapi\.json)$ {
+        include snippets/proxy.conf;
+        proxy_set_header X-Client-Verify "";
+        proxy_set_header X-Client-Cert   "";
+        proxy_set_header X-Proxy-Secret  "";
+        proxy_pass $bc_api;
+    }
+
+    location / {
+        include snippets/proxy.conf;
+        proxy_pass $bc_web;
+    }
+}

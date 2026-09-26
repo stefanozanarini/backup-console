@@ -1,0 +1,251 @@
+# Installazione su VM Azure (Ubuntu 24.04)
+
+Risultato: `https://backup-console.agsmedia.it` con console, API ed endpoint degli
+agenti, dietro un nginx in container che potrà servire anche altre applicazioni.
+
+```
+VM Azure
+├─ /opt/backup-console            repository (stack edge/ e console/deploy/)
+├─ /srv/backup-console/ca         CA degli agenti + chiave dei segreti (da salvare!)
+├─ stack "edge"                   nginx + certbot, porte 80/443
+└─ stack "backup-console"         api, worker, frontend, db (nessuna porta esposta)
+        └── rete Docker condivisa "proxy" ──┘
+```
+
+## 1. VM e rete
+
+- **Immagine**: Ubuntu Server 24.04 LTS.
+- **Dimensione**: B2s (2 vCPU, 4 GB) basta per un centinaio di agenti; B2ms se ci andranno
+  altre applicazioni.
+- **Disco**: SSD Premium da 64 GB.
+- **IP pubblico**: statico.
+- **NSG in ingresso**:
+
+  | Porta | Sorgente | Perché |
+  |---|---|---|
+  | 443/tcp | Any | console e agenti |
+  | 80/tcp | Any | challenge Let's Encrypt e redirect a HTTPS |
+  | 22/tcp | solo IP dell'ufficio (oppure niente, usando Azure Bastion) | amministrazione |
+
+- **Uscita**: libera (Let's Encrypt, GHCR, Entra ID).
+- **DNS**: record **A** `backup-console.agsmedia.it` → IP pubblico della VM, da creare
+  **prima** del passo 6.
+
+## 2. Sistema di base
+
+```bash
+sudo apt update && sudo apt -y full-upgrade
+sudo apt -y install ca-certificates curl git unattended-upgrades
+sudo timedatectl set-timezone Europe/Rome
+```
+
+Docker Engine dal repository ufficiale:
+
+```bash
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" | sudo tee /etc/apt/sources.list.d/docker.list
+sudo apt update && sudo apt -y install docker-ce docker-ce-cli containerd.io docker-compose-plugin
+sudo usermod -aG docker $USER
+```
+
+Poi uscire e rientrare, così il gruppo `docker` diventa attivo.
+
+## 3. Repository, directory e rete condivisa
+
+```bash
+sudo git clone https://github.com/stefanozanarini/backup-console.git /opt/backup-console
+sudo chown -R $USER: /opt/backup-console
+```
+
+La CA degli agenti vive sull'host. La scrive il container della console (utente 10001) e
+nginx la legge in sola lettura. Il `.crt` è leggibile da tutti, la chiave è in `0600`:
+
+```bash
+sudo install -d -o 10001 -g 10001 -m 755 /srv/backup-console/ca
+```
+
+La rete condivisa tra nginx e le applicazioni si crea una volta sola:
+
+```bash
+docker network create proxy
+```
+
+Se il repository GHCR è privato, bisogna fare login con un token GitHub (permesso
+`read:packages`):
+
+```bash
+docker login ghcr.io -u stefanozanarini
+```
+
+## 4. Segreti
+
+```bash
+openssl rand -hex 32
+openssl rand -base64 24
+```
+
+- Il primo comando genera **BC_PROXY_SECRET**. Va messo nel `.env` della console e in quello
+  di edge, con lo stesso valore in entrambi.
+- Il secondo genera **POSTGRES_PASSWORD**.
+
+## 5. Stack della console
+
+```bash
+cd /opt/backup-console/console/deploy
+cp .env.example .env
+nano .env
+```
+
+In `.env` impostare:
+- `BC_PUBLIC_URL`;
+- `POSTGRES_PASSWORD` e `BC_PROXY_SECRET`;
+- le variabili Entra ID (vedi il passo 8).
+
+Poi avviare:
+
+```bash
+docker compose pull
+docker compose up -d
+docker compose logs init
+```
+
+Nel log di `init` deve comparire "CA agenti creata" e il file
+`/srv/backup-console/ca/agent-ca.crt` deve esistere. La console va avviata **prima** di
+nginx, che senza quel file non parte.
+
+## 6. nginx e certificato
+
+```bash
+cd /opt/backup-console/edge
+cp .env.example .env
+nano .env
+./certs.sh issue backup-console it@agsmedia.it backup-console.agsmedia.it
+docker compose up -d
+```
+
+In `edge/.env` impostare `BC_HOSTNAMES` e lo stesso `BC_PROXY_SECRET` della console.
+
+`certs.sh issue` fa tre cose:
+1. crea un certificato temporaneo, così nginx può partire;
+2. ottiene quello vero da Let's Encrypt tramite la porta 80;
+3. ricarica nginx.
+
+I rinnovi sono automatici: il container `certbot` controlla ogni 12 ore e nginx si ricarica
+ogni 6. Registrandosi presso Let's Encrypt con l'email indicata si accettano i suoi termini
+di servizio.
+
+## 7. Primo amministratore
+
+```bash
+cd /opt/backup-console/console/deploy
+docker compose exec api python -m app.cli create-user stefano.zanarini@agsmedia.it
+```
+
+## 8. Login con Entra ID
+
+In **Entra ID → Registrazioni app** servono due registrazioni.
+
+**API "Backup Console API"**
+1. *Esporre un'API*: Application ID URI `api://backup-console`, con lo scope `access`
+   (consenso: amministratori).
+2. *Manifesto*: `"requestedAccessTokenVersion": 2`.
+3. Il suo **client ID** va in `BC_OIDC_AUDIENCE`.
+
+**SPA "Backup Console"**
+1. *Autenticazione*: piattaforma **Applicazione a pagina singola**, redirect URI
+   `https://backup-console.agsmedia.it`.
+2. *Autorizzazioni API*: aggiungere `api://backup-console/access` e concedere il consenso.
+3. Il suo **client ID** va in `BC_OIDC_SPA_CLIENT_ID`.
+
+Il resto di `.env`:
+
+```
+BC_AUTH_MODE=oidc
+BC_OIDC_ISSUER=https://login.microsoftonline.com/<tenant-id>/v2.0
+BC_OIDC_JWKS_URL=https://login.microsoftonline.com/<tenant-id>/discovery/v2.0/keys
+BC_OIDC_AUTHORITY=https://login.microsoftonline.com/<tenant-id>
+BC_OIDC_SCOPE=api://backup-console/access
+```
+
+Poi `docker compose up -d` per applicare. Il login funziona solo per gli utenti creati in
+console (passo 7): un account Entra valido ma non registrato riceve "utente non abilitato".
+L'MFA si impone con l'accesso condizionale di Entra.
+
+> `BC_AUTH_MODE=dev` è solo per lo sviluppo: accetta un'email qualsiasi senza password.
+> Non usarlo mai sulla VM.
+
+## 9. Verifica
+
+```bash
+curl -sI https://backup-console.agsmedia.it | head -1
+curl -s https://backup-console.agsmedia.it/api/v1/auth-config
+curl -s -X POST https://backup-console.agsmedia.it/agent/v1/heartbeat
+```
+
+Risposte attese:
+1. `HTTP/2 200`;
+2. `{"mode":"oidc",...}`;
+3. `{"detail":"certificato client mancante"}`.
+
+Poi:
+1. entrare nella console;
+2. caricare un rilascio da **Aggiornamenti agente** (file della GitHub Release);
+3. generare un token in **Tenant e siti**;
+4. installare il primo agente.
+
+## 10. Aggiornamenti
+
+```bash
+cd /opt/backup-console && git pull
+cd console/deploy && docker compose pull && docker compose up -d
+cd ../../edge && docker compose pull && docker compose up -d
+```
+
+Le migrazioni del database le applica il servizio `init` a ogni avvio.
+
+## 11. Backup
+
+Cosa salvare:
+
+| Cosa | Dove | Se si perde |
+|---|---|---|
+| Database | volume `backup-console_pgdata` | storico, configurazione, dispositivi |
+| `ca/agent-ca.crt` + `agent-ca.key` | `/srv/backup-console/ca` | senza la CA gli agenti vanno tutti registrati di nuovo |
+| `ca/secret.key` | `/srv/backup-console/ca` | i TOTP non si decifrano più: ogni utente va resettato (`reset-totp`) |
+| `.env` (console ed edge) | `/opt/backup-console/...` | segreti e configurazione |
+
+Dump notturno dal crontab di **root** (`sudo crontab -e`), perché la chiave della CA è
+leggibile solo dal suo proprietario:
+
+```
+30 2 * * * cd /opt/backup-console/console/deploy && docker compose exec -T db pg_dump -U bc -Fc bc > /srv/backup-console/backup/bc-$(date +\%a).dump && tar czf /srv/backup-console/backup/ca-$(date +\%a).tgz -C /srv/backup-console ca
+```
+
+La directory va creata prima: `sudo install -d -m 700 /srv/backup-console/backup`. Il
+comando conserva gli ultimi 7 giorni, per nome del giorno. Poi va copiata fuori dalla VM, per
+esempio con `azcopy sync` verso uno storage account con immutabilità, oppure con Azure Backup
+della VM.
+
+## 12. Altre applicazioni sulla stessa VM
+
+1. Il container della nuova app si collega alla rete `proxy` con un alias univoco e **senza**
+   porte pubblicate.
+2. In `edge/templates/` si copia `_esempio-app.conf.template.txt` in `<app>.conf.template` e
+   lo si adatta.
+3. La variabile del nome host va aggiunta in `edge/docker-compose.yml`.
+4. `./certs.sh issue <app> <email> <nome-host>`
+5. `docker compose up -d --force-recreate nginx`
+
+nginx risolve i nomi dei container a ogni richiesta: un'app ferma dà 502 solo sul suo nome host
+e non blocca le altre.
+
+## Problemi comuni
+
+- **nginx non parte, "agent-ca.crt: No such file"**: la console non è ancora stata avviata
+  (passo 5), oppure `BC_DATA_DIR` è diverso nei due `.env`.
+- **502 Bad Gateway**: `api` o `frontend` fermi. Controllare con
+  `docker compose ps` e `docker compose logs api` in `console/deploy`.
+- **Gli agenti ricevono sempre "certificato client mancante"**: `BC_PROXY_SECRET` è diverso
+  tra i due `.env`. Dopo averlo modificato: `docker compose up -d` in entrambi.
+- **Stato dei certificati**: `docker compose run --rm certbot certificates` in `edge/`.

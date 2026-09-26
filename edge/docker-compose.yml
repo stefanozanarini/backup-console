@@ -1,0 +1,51 @@
+# Reverse proxy di bordo della VM: unico punto d'ingresso (80/443) per tutte le
+# applicazioni in container. Ogni applicazione aggiunge un template in templates/
+# e si collega alla rete Docker esterna "proxy".
+#
+#   docker network create proxy          (una volta sola)
+#   docker compose --env-file .env up -d
+name: edge
+
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    environment:
+      # Usate dai template (envsubst sostituisce solo le variabili definite qui:
+      # le variabili di nginx come $host restano intatte).
+      BC_HOSTNAMES: ${BC_HOSTNAMES:?imposta BC_HOSTNAMES}
+      # Stesso valore di BC_PROXY_SECRET nel .env della console.
+      BC_PROXY_SECRET: ${BC_PROXY_SECRET:?imposta BC_PROXY_SECRET}
+    volumes:
+      - ./templates:/etc/nginx/templates:ro
+      - ./snippets:/etc/nginx/snippets:ro
+      - ./reload-loop.sh:/docker-entrypoint.d/90-reload-loop.sh:ro
+      - letsencrypt:/etc/letsencrypt:ro
+      - certbot-webroot:/var/www/certbot:ro
+      # CA degli agenti della Backup Console (solo agent-ca.crt viene letto).
+      - ${BC_DATA_DIR:-/srv/backup-console}/ca:/etc/nginx/backup-console-ca:ro
+    # conf.d viene generata dai template a ogni avvio (niente default.conf dell'immagine).
+    tmpfs:
+      - /etc/nginx/conf.d
+    networks: [proxy]
+
+  # Rinnovo automatico dei certificati Let's Encrypt (challenge HTTP-01 via webroot).
+  certbot:
+    image: certbot/certbot:latest
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "-c", "trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done"]
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - certbot-webroot:/var/www/certbot
+
+volumes:
+  letsencrypt:
+  certbot-webroot:
+
+networks:
+  proxy:
+    external: true
+    name: ${PROXY_NETWORK:-proxy}

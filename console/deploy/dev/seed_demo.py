@@ -1,9 +1,9 @@
 """Popola uno stack di sviluppo con tenant, dispositivi e 7 giorni di metriche finte.
 
-Passa dagli endpoint reali (enrollment + mTLS via Caddy), quindi esercita anche il
+Passa dagli endpoint reali (enrollment + mTLS via nginx), quindi esercita anche il
 percorso agente. Da lanciare con il venv del backend:
 
-    console/backend/.venv/bin/python console/deploy/dev/seed_demo.py --ca caddy-root.crt
+    console/backend/.venv/bin/python console/deploy/dev/seed_demo.py --ca edge/dev-ca.crt
 
 Richiede BC_AUTH_MODE=dev e un superadmin già creato (default admin@example.com).
 """
@@ -89,9 +89,9 @@ def env(payload) -> dict:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--console", default="https://console.localhost:18443")
-    ap.add_argument("--agents", default="https://agents.localhost:18443")
-    ap.add_argument("--ca", required=True, help="root CA di Caddy (tls internal)")
+    ap.add_argument("--console", default="https://backup-console.localhost:18443")
+    ap.add_argument("--agents", default="https://backup-console.localhost:18443")
+    ap.add_argument("--ca", required=True, help="CA del certificato di test (edge/dev-ca.crt)")
     ap.add_argument("--user", default="admin@example.com")
     args = ap.parse_args()
 
