@@ -38,7 +38,7 @@ connessione. Nei siti non si apre nessuna porta in ingresso.
 | Frontend | React + Vite + TypeScript, servito da nginx non privilegiato | `console/frontend` |
 | Agente | Go, binario statico senza dipendenze | `agent/` |
 | Pacchetti | QPKG (QDK) per QNAP, MSI (WiX v5) per Windows | `packaging/` |
-| CI/CD | GitHub Actions, immagini su GHCR | `.github/workflows` |
+| CI/CD | GitHub Actions, immagini su GHCR con tag di versione (`console-vX.Y.Z`); deploy con `deploy.sh` sulla VM | `.github/workflows`, `deploy.sh` |
 
 Perché l'agente è in Go anche se il backend è Python: sui QNAP (specie ARM
 più vecchi) Python manca o varia tra versioni, mentre un binario statico gira

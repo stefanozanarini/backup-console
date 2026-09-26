@@ -20,7 +20,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Backup Console", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Backup Console", version=settings.build_version, lifespan=lifespan)
 app.include_router(agent_router)
 app.include_router(ui_router)
 app.include_router(ops_router)
@@ -28,4 +28,4 @@ app.include_router(ops_router)
 
 @app.get("/healthz", include_in_schema=False)
 async def healthz():
-    return {"ok": True}
+    return {"ok": True, "version": settings.build_version}

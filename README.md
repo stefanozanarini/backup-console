@@ -164,3 +164,7 @@ piattaforma).
 ## Produzione (VM Azure)
 
 Guida completa, dalla VM appena creata alla console online: [docs/deploy-azure.md](docs/deploy-azure.md).
+
+- **Rilascio della console**: tag `console-vX.Y.Z`, la CI pubblica le immagini `:X.Y.Z` su GHCR.
+- **Deploy sulla VM**: `./deploy.sh --version X.Y.Z`, con backup del DB, healthcheck, controllo
+  della versione e istruzioni per tornare indietro.

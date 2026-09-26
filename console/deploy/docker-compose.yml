@@ -5,7 +5,7 @@
 name: backup-console
 
 x-backend: &backend
-  image: ${BACKEND_IMAGE:-ghcr.io/stefanozanarini/backup-console-backend:latest}
+  image: ${BACKEND_IMAGE:-ghcr.io/stefanozanarini/backup-console-backend:${BC_VERSION:?imposta BC_VERSION}}
   build: ../backend
   restart: unless-stopped
   environment:
@@ -57,6 +57,12 @@ services:
     <<: *backend
     depends_on:
       init: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     networks:
       internal: {}
       # Nome univoco sulla rete condivisa con le altre applicazioni della VM.
@@ -69,9 +75,14 @@ services:
       init: { condition: service_completed_successfully }
 
   frontend:
-    image: ${FRONTEND_IMAGE:-ghcr.io/stefanozanarini/backup-console-frontend:latest}
+    image: ${FRONTEND_IMAGE:-ghcr.io/stefanozanarini/backup-console-frontend:${BC_VERSION:?imposta BC_VERSION}}
     build: ../frontend
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     networks:
       proxy: { aliases: [backup-console-web] }
 

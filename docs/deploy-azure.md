@@ -98,21 +98,30 @@ nano .env
 ```
 
 In `.env` impostare:
+- `BC_VERSION`: la versione da installare, cioè il numero del tag `console-vX.Y.Z` su GitHub;
 - `BC_PUBLIC_URL`;
 - `POSTGRES_PASSWORD` e `BC_PROXY_SECRET`;
 - le variabili Entra ID (vedi il passo 8).
 
+Directory dei backup pre-deploy (le usa `deploy.sh`):
+
+```bash
+sudo install -d -m 700 -o $USER /srv/backup-console/backup
+```
+
 Poi avviare:
 
 ```bash
+cd /opt/backup-console/console/deploy
 docker compose pull
-docker compose up -d
+docker compose up -d --no-build
 docker compose logs init
 ```
 
 Nel log di `init` deve comparire "CA agenti creata" e il file
 `/srv/backup-console/ca/agent-ca.crt` deve esistere. La console va avviata **prima** di
-nginx, che senza quel file non parte.
+nginx, che senza quel file non parte. Il controllo sull'URL pubblico che fa `deploy.sh`
+riuscirà solo dopo il passo 6: per questo la prima volta si avvia a mano.
 
 ## 6. nginx e certificato
 
@@ -196,13 +205,38 @@ Poi:
 
 ## 10. Aggiornamenti
 
+**Rilascio**, da GitHub: si crea un tag `console-vX.Y.Z` sul commit da rilasciare, per esempio
+`git tag console-v0.3.0 && git push origin console-v0.3.0`. La CI esegue i test e pubblica le
+immagini `:X.Y.Z` e `:latest` su GHCR. I push su `main` producono solo `:main`, che non va usato
+in produzione.
+
+**Deploy**, sulla VM:
+
 ```bash
-cd /opt/backup-console && git pull
-cd console/deploy && docker compose pull && docker compose up -d
-cd ../../edge && docker compose pull && docker compose up -d
+cd /opt/backup-console
+./deploy.sh --version 0.3.0
 ```
 
-Le migrazioni del database le applica il servizio `init` a ogni avvio.
+Lo script:
+1. aggiorna i file di configurazione (`git pull`);
+2. valida la configurazione;
+3. scarica le immagini;
+4. fa il **backup del database** in `/srv/backup-console/backup/` (sono le migrazioni a
+   modificarlo);
+5. riavvia i container;
+6. attende la fine delle migrazioni e gli healthcheck;
+7. verifica che sia in esecuzione proprio la versione richiesta e che la console risponda
+   attraverso nginx.
+
+Se qualcosa fallisce prima del riavvio, `.env` torna com'era e non cambia niente.
+
+- **Tornare indietro**: `./deploy.sh --no-git --version <precedente>`. Se la versione nuova
+  aveva migrazioni del database, ripristinare anche il backup indicato dallo script
+  (`pg_restore`).
+- **Aggiornare anche nginx/certbot**: `./deploy.sh --edge`.
+- **Solo riavvio con la stessa versione** (per esempio dopo aver modificato `.env`): `./deploy.sh`.
+
+Lo storico dei deploy è in `/opt/backup-console/deploy.log`.
 
 ## 11. Backup
 

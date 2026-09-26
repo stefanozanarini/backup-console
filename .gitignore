@@ -13,3 +13,5 @@ agent.json
 node_modules/
 dist/
 *.tsbuildinfo
+deploy.log
+console/deploy/.env.bak

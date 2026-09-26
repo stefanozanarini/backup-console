@@ -6,6 +6,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="BC_", env_file=".env", extra="ignore")
 
+    # Versione dell'immagine (build-arg VERSION della CI): /healthz la riporta.
+    build_version: str = "dev"
+
     database_url: str = "postgresql+asyncpg://bc:bc@localhost:5432/bc"
     # False nei test: evita di riusare connessioni tra event loop diversi.
     db_pool: bool = True
