@@ -48,12 +48,17 @@ ovunque ed è facile da impacchettare come QPKG e MSI.
 
 ### Identità degli agenti (mTLS)
 
-1. In console si genera un **token di enrollment** monouso (24h) legato a tenant e sito.
-   Nel DB si salva solo l'hash.
+1. In console si genera un **token di enrollment** legato a tenant e sito, con validità da 2 ore a
+   7 giorni. Può valere per **un dispositivo** oppure per **N dispositivi** (rollout via GPO,
+   Intune o script). Si può revocare, e la sua nota compare in Approvazioni accanto ai dispositivi
+   registrati con quel token. Nel DB si salva solo l'hash.
+   Il token autorizza anche il **download dell'ultima versione** dell'agente o del QPKG
+   (`GET /agent/v1/download/{piattaforma}` con header `X-Enroll-Token`, mai nell'URL). Il download
+   non consuma utilizzi: li consuma solo l'enrollment.
 2. L'agente genera la propria chiave EC **sul dispositivo** e invia token + CSR a `/agent/v1/enroll`.
 3. La CA agenti interna firma il certificato con **CN = agent_id** (il subject richiesto viene ignorato).
-4. L'agente resta `pending` finché un operatore non lo **approva**. Il passo manuale evita
-   che un token trapelato permetta di registrare macchine estranee.
+4. L'agente resta `pending` finché un operatore non lo **approva**, anche in blocco. Il passo
+   manuale evita che un token trapelato permetta di registrare macchine estranee.
 5. Caddy verifica il certificato contro `agent-ca.crt` e passa al backend il fingerprint
    SHA-256 nell'header `X-Client-Cert-Fingerprint`, sovrascrivendo sempre quello inviato
    dal client. Il backend cerca l'agente per fingerprint, quindi la **revoca** ha effetto

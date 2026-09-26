@@ -13,6 +13,25 @@ from app.config import settings
 VERSION_RE = re.compile(r"^\d+\.\d+\.\d+([.-][0-9A-Za-z.-]+)?$")
 
 
+QPKG_RE = re.compile(r"^BackupConsoleAgent_(?P<version>[^_]+)_(?P<arch>x86_64|arm_64|arm-x41|arm-x31)\.qpkg$")
+BIN_RE = re.compile(r"^bc-agent-(?P<platform>(linux|windows)-(amd64|arm64|armv7))(\.exe)?$")
+
+
+def asset_key(filename: str) -> str | None:
+    """Nome file caricato → chiave dell'asset (es. windows-amd64, qpkg-x86_64)."""
+    if m := BIN_RE.match(filename):
+        return m.group("platform")
+    if m := QPKG_RE.match(filename):
+        return f"qpkg-{m.group('arch')}"
+    return None
+
+
+def download_name(version: str, key: str) -> str:
+    if key.startswith("qpkg-"):
+        return f"BackupConsoleAgent_{version}_{key.removeprefix('qpkg-')}.qpkg"
+    return "bc-agent.exe" if key.startswith("windows-") else f"bc-agent-{key}"
+
+
 def asset_path(version: str, platform: str) -> Path:
     return Path(settings.releases_dir) / version / f"bc-agent-{platform}"
 

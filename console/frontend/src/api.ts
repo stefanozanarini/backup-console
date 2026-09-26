@@ -39,6 +39,24 @@ export async function api<T>(path: string, init: ApiInit = {}): Promise<T> {
   return (await r.json()) as T;
 }
 
+/** Scarica un file dall'API (serve l'header di autenticazione, quindi niente link diretto). */
+export async function downloadFile(path: string, fallbackName: string): Promise<void> {
+  const r = await fetch(`/api/v1${path}`, { headers: await authHeaders() });
+  if (!r.ok) throw new ApiError(r.status, r.statusText);
+  const name = /filename="?([^";]+)"?/.exec(r.headers.get("content-disposition") ?? "")?.[1] ?? fallbackName;
+  const url = URL.createObjectURL(await r.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/** Chiede ai contatori globali (sidebar) di ricaricarsi subito. */
+export function notifyChange(): void {
+  window.dispatchEvent(new Event("bc:changed"));
+}
+
 /** GET con ricarica manuale e, se indicato, aggiornamento periodico. */
 export function useApi<T>(path: string | null, refreshMs?: number) {
   const [data, setData] = useState<T | null>(null);
@@ -69,7 +87,12 @@ export function useApi<T>(path: string | null, refreshMs?: number) {
     const id = window.setInterval(() => {
       if (document.visibilityState === "visible") void load();
     }, refreshMs);
-    return () => window.clearInterval(id);
+    const onChange = () => void load();
+    window.addEventListener("bc:changed", onChange);
+    return () => {
+      window.clearInterval(id);
+      window.removeEventListener("bc:changed", onChange);
+    };
   }, [load, path, refreshMs]);
 
   return { data, error, loading, reload: load };

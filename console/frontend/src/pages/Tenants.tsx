@@ -3,7 +3,7 @@ import { api, useApi } from "../api";
 import { ErrorBox } from "../components";
 import { useConsole } from "../context";
 import { dateTime } from "../format";
-import type { EnrollmentToken, Site, Tenant } from "../types";
+import type { EnrollmentToken, Site, Tenant, TokenInfo } from "../types";
 
 export default function Tenants() {
   const { tenants, isSuperadmin, reloadTenants } = useConsole();
@@ -89,47 +89,164 @@ function TenantCard({ tenant }: { tenant: Tenant }) {
   );
 }
 
+/** Comandi di installazione: scaricano l'ultima versione con il token (header) e registrano. */
+function installCommands(server: string, token: string) {
+  const windows =
+    `# PowerShell come amministratore. Idempotente: se l'agente è già installato non fa nulla.\n` +
+    `if (-not (Get-Service BackupConsoleAgent -ErrorAction SilentlyContinue)) {\n` +
+    `  [Net.ServicePointManager]::SecurityProtocol = 'Tls12'\n` +
+    `  $t = '${token}'; $f = "$env:TEMP\\bc-agent.exe"\n` +
+    `  Invoke-WebRequest -UseBasicParsing -Headers @{ 'X-Enroll-Token' = $t } -Uri '${server}/agent/v1/download/windows-amd64' -OutFile $f\n` +
+    `  & $f install -server '${server}' -token $t\n` +
+    `  Remove-Item $f\n` +
+    `}`;
+  const qnap =
+    `# SSH come admin sul NAS: scarica il QPKG giusto, lo installa e registra l'agente.\n` +
+    `T='${token}'; S='${server}'\n` +
+    `case "$(uname -m)" in x86_64) A=x86_64;; aarch64) A=arm_64;; *) A=arm-x41;; esac\n` +
+    `curl -fsS -H "X-Enroll-Token: $T" -o /tmp/bc-agent.qpkg "$S/agent/v1/download/qpkg-$A" \\\n` +
+    `  && sh /tmp/bc-agent.qpkg \\\n` +
+    `  && sh "$(/sbin/getcfg BackupConsoleAgent Install_Path -f /etc/config/qpkg.conf)/bc-agent.sh" enroll -server "$S" -token "$T"\n` +
+    `rm -f /tmp/bc-agent.qpkg`;
+  return { windows, qnap };
+}
+
 function SiteRow({ site, writable }: { site: Site; writable: boolean }) {
   const { session } = useConsole();
+  const tokens = useApi<TokenInfo[]>(writable ? `/sites/${site.id}/enrollment-tokens` : null);
+  const [open, setOpen] = useState(false);
   const [token, setToken] = useState<EnrollmentToken | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const server = session.agentsUrl || "https://agents.<dominio>";
 
-  async function generate() {
+  async function revoke(t: TokenInfo) {
+    if (!confirm(`Revocare il token "${t.note ?? "senza nota"}"? Gli agenti già registrati non sono toccati.`)) return;
     setError(null);
     try {
-      setToken(await api<EnrollmentToken>(`/sites/${site.id}/enrollment-tokens`, { method: "POST", body: {} }));
+      await api(`/enrollment-tokens/${t.id}/revoke`, { method: "POST" });
+      if (token?.id === t.id) setToken(null);
+      await tokens.reload();
     } catch (err) {
       setError(err as Error);
     }
   }
 
-  const qnapCmd = token &&
-    `QPKG_DIR=$(/sbin/getcfg BackupConsoleAgent Install_Path -f /etc/config/qpkg.conf)\n` +
-    `sh "$QPKG_DIR/bc-agent.sh" enroll -server ${server} -token ${token.token}`;
-  const winCmd = token && `"C:\\Program Files\\BackupConsoleAgent\\bc-agent.exe" enroll -server ${server} -token ${token.token}`;
+  const cmds = token && installCommands(server, token.token);
+  const active = tokens.data ?? [];
 
   return (
     <div style={{ padding: "8px 0", borderTop: "1px solid var(--border)" }}>
       <div className="form-row" style={{ justifyContent: "space-between" }}>
         <span>{site.name}</span>
-        {writable && <button className="btn small" onClick={() => void generate()}>Genera token di installazione</button>}
+        {writable && !open && <button className="btn small" onClick={() => setOpen(true)}>Nuovo token di installazione</button>}
       </div>
       <ErrorBox error={error} />
-      {token && (
+      {open && !token && (
+        <NewTokenForm
+          siteId={site.id}
+          onCancel={() => setOpen(false)}
+          onCreated={(t) => {
+            setToken(t);
+            void tokens.reload();
+          }}
+        />
+      )}
+      {token && cmds && (
         <div className="token-box">
           <div className="notice">
-            Token monouso, valido fino al {dateTime(token.expires_at)}. Viene mostrato una sola volta.
+            Token per {token.max_uses === 1 ? "un dispositivo" : `${token.max_uses} dispositivi`}, valido fino al{" "}
+            {dateTime(token.expires_at)}. Viene mostrato una sola volta: i dispositivi registrati andranno comunque
+            approvati in <strong>Approvazioni</strong>.
           </div>
-          <div className="label" style={{ marginTop: 10 }}>NAS QNAP (SSH, dopo aver installato il QPKG) <CopyButton text={qnapCmd!} /></div>
-          <pre className="mono">{qnapCmd}</pre>
-          <div className="label">Windows (prompt amministratore) <CopyButton text={winCmd!} /></div>
-          <pre className="mono">{winCmd}</pre>
-          <div className="label">Solo token <CopyButton text={token.token} /></div>
+          <div className="label" style={{ marginTop: 10 }}>Windows: server Veeam e PC <CopyButton text={cmds.windows} /></div>
+          <pre className="mono">{cmds.windows}</pre>
+          <div className="label">NAS QNAP (SSH) <CopyButton text={cmds.qnap} /></div>
+          <pre className="mono">{cmds.qnap}</pre>
+          <div className="label">Solo token (installazione manuale) <CopyButton text={token.token} /></div>
           <pre className="mono">{token.token}</pre>
+          <div className="btn-row" style={{ justifyContent: "flex-end" }}>
+            <button className="btn small" onClick={() => { setToken(null); setOpen(false); }}>Chiudi</button>
+          </div>
+        </div>
+      )}
+      {active.length > 0 && (
+        <div className="table-wrap" style={{ marginTop: 8 }}>
+          <table>
+            <thead><tr><th>Token attivi</th><th className="num">Utilizzi</th><th>Scadenza</th><th /></tr></thead>
+            <tbody>
+              {active.map((t) => (
+                <tr key={t.id}>
+                  <td>{t.note ?? <span className="muted">senza nota</span>}</td>
+                  <td className="num">{t.uses} / {t.max_uses}</td>
+                  <td className="nowrap muted">{dateTime(t.expires_at)}</td>
+                  <td className="num"><button className="btn small danger" onClick={() => void revoke(t)}>Revoca</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>
+  );
+}
+
+function NewTokenForm(props: { siteId: string; onCancel: () => void; onCreated: (t: EnrollmentToken) => void }) {
+  const [note, setNote] = useState("");
+  const [bulk, setBulk] = useState(false);
+  const [uses, setUses] = useState(10);
+  const [hours, setHours] = useState(24);
+  const [error, setError] = useState<Error | null>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    try {
+      props.onCreated(
+        await api<EnrollmentToken>(`/sites/${props.siteId}/enrollment-tokens`, {
+          method: "POST",
+          body: { note: note.trim() || null, max_uses: bulk ? uses : 1, valid_hours: hours },
+        }),
+      );
+    } catch (err) {
+      setError(err as Error);
+    }
+  }
+
+  return (
+    <form className="token-box stack" onSubmit={submit}>
+      <label className="field">Nota (compare in Approvazioni)
+        <input type="text" maxLength={200} value={note} placeholder={bulk ? "es. Rollout GPO PC amministrazione" : "es. VBR-SRV02"}
+          onChange={(e) => setNote(e.target.value)} autoFocus />
+      </label>
+      <div className="form-row">
+        <label className="form-row" style={{ gap: 6 }}>
+          <input type="radio" checked={!bulk} onChange={() => setBulk(false)} /> Un dispositivo
+        </label>
+        <label className="form-row" style={{ gap: 6 }}>
+          <input type="radio" checked={bulk} onChange={() => setBulk(true)} /> Rollout su più dispositivi
+        </label>
+      </div>
+      <div className="form-row">
+        {bulk && (
+          <label className="field" style={{ flex: "0 0 auto" }}>Numero massimo di dispositivi
+            <input type="number" min={2} max={500} value={uses} onChange={(e) => setUses(Number(e.target.value))} style={{ width: 120 }} />
+          </label>
+        )}
+        <label className="field" style={{ flex: "0 0 auto" }}>Validità
+          <select value={hours} onChange={(e) => setHours(Number(e.target.value))}>
+            <option value={2}>2 ore</option>
+            <option value={24}>24 ore</option>
+            <option value={72}>3 giorni</option>
+            <option value={168}>7 giorni</option>
+          </select>
+        </label>
+      </div>
+      <ErrorBox error={error} />
+      <div className="btn-row" style={{ justifyContent: "flex-end" }}>
+        <button type="button" className="btn" onClick={props.onCancel}>Annulla</button>
+        <button type="submit" className="btn primary">Genera token</button>
+      </div>
+    </form>
   );
 }
 

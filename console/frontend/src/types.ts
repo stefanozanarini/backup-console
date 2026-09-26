@@ -39,6 +39,7 @@ export interface Agent {
   cert_not_after: string;
   enrolled_at: string;
   approved_at: string | null;
+  enrollment_note: string | null;
 }
 
 export type DeviceKind = "nas" | "server" | "pc";
@@ -203,8 +204,21 @@ export interface MetricSeries {
 }
 
 export interface EnrollmentToken {
+  id: string;
   token: string;
   expires_at: string;
+  max_uses: number;
+}
+
+export interface TokenInfo {
+  id: string;
+  site_id: string;
+  note: string | null;
+  uses: number;
+  max_uses: number;
+  expires_at: string;
+  used_at: string | null;
+  created_at: string;
 }
 
 export type AuthConfig =

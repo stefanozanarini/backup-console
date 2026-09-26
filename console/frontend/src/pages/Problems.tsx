@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { api, useApi } from "../api";
+import { api, notifyChange, useApi } from "../api";
 import { Empty, ErrorBox, SeverityBadge, StateBadge } from "../components";
 import { useConsole } from "../context";
 import { ago, dateTime } from "../format";
@@ -42,6 +42,7 @@ export default function Problems() {
     try {
       await api(`/problems/${p.id}/ack`, { method: "POST" });
       await Promise.all([problems.reload(), summary.reload()]);
+      notifyChange();
     } catch (e) {
       setActionError(e as Error);
     } finally {

@@ -3,7 +3,7 @@ import hashlib
 import time
 import uuid
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, Header, HTTPException, Query, Request, Response, status
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
@@ -29,6 +29,8 @@ from app.models import (
     Event,
     InventorySnapshot,
     Metric,
+    Release,
+    token_usable,
 )
 from app.models.base import utcnow
 from app.schemas.agent import (
@@ -50,7 +52,7 @@ from app.services.audit import audit
 from app.services.ca import CSRError
 from app.services import veeam as veeam_service
 from app.services.problems import evaluate_metrics, raise_problem, resolve_problem
-from app.services.releases import asset_path
+from app.services.releases import asset_path, download_name
 
 router = APIRouter(prefix="/agent/v1", tags=["agent"])
 
@@ -81,8 +83,8 @@ async def enroll(body: EnrollRequest, request: Request, session: SessionDep, ca:
         .where(EnrollmentToken.token_hash == hash_token(body.token))
         .with_for_update()
     )
-    if token is None or token.used_at is not None or token.expires_at < now:
-        # Stessa risposta per token inesistente, usato o scaduto.
+    if token is None or not token_usable(token, now):
+        # Stessa risposta per token inesistente, esaurito, revocato o scaduto.
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "token di enrollment non valido")
 
     agent_id = uuid.uuid4()
@@ -112,9 +114,11 @@ async def enroll(body: EnrollRequest, request: Request, session: SessionDep, ca:
         version=body.agent_version,
         allow_shell=body.allow_shell,
         last_ip=client_ip(request),
+        enrollment_token_id=token.id,
     )
     session.add(agent)
     token.used_at = now
+    token.uses += 1
     await session.flush()
     audit(
         session, "agent.enroll", agent_id=agent_id, tenant_id=device.tenant_id,
@@ -124,6 +128,36 @@ async def enroll(body: EnrollRequest, request: Request, session: SessionDep, ca:
     return EnrollResponse(
         agent_id=agent_id, device_id=device.id, status=agent.status, cert_pem=cert_pem, ca_pem=ca.ca_pem()
     )
+
+
+@router.get("/download/{key}")
+async def bootstrap_download(
+    key: str, request: Request, session: SessionDep, x_enroll_token: str = Header(...),
+):
+    """Ultima versione dell'agente o del QPKG, per l'installazione con un solo comando.
+    Autorizzato dal token di enrollment (nell'header, mai nell'URL), senza consumarlo."""
+    token = await session.scalar(
+        select(EnrollmentToken).where(EnrollmentToken.token_hash == hash_token(x_enroll_token))
+    )
+    if token is None or not token_usable(token, utcnow()):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "token di enrollment non valido")
+    row = await session.execute(
+        select(ReleaseAsset)
+        .join(Release, Release.version == ReleaseAsset.version)
+        .where(ReleaseAsset.platform == key)
+        .order_by(Release.created_at.desc())
+        .limit(1)
+    )
+    asset = row.scalar()
+    path = asset_path(asset.version, key) if asset else None
+    if asset is None or path is None or not path.is_file():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"nessun rilascio disponibile per {key}")
+    audit(session, "agent.bootstrap_download", tenant_id=token.tenant_id, target=f"{asset.version}/{key}",
+          ip=client_ip(request), token_note=token.note)
+    await session.commit()
+    return FileResponse(path, media_type="application/octet-stream",
+                        filename=download_name(asset.version, key),
+                        headers={"X-Agent-Version": asset.version, "X-Content-SHA256": asset.sha256})
 
 
 @router.post("/heartbeat", response_model=HeartbeatResponse)

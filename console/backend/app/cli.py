@@ -4,7 +4,7 @@
   create-user EMAIL [--role superadmin|operator] [--tenant SLUG]
   create-tenant NOME SLUG
   create-site SLUG NOME
-  create-token SLUG NOME_SITO [--note TESTO]
+  create-token SLUG NOME_SITO [--note TESTO] [--uses N] [--hours H]
   reset-totp EMAIL             disattiva il TOTP di un utente (che dovrà riconfigurarlo)
 """
 
@@ -81,20 +81,21 @@ async def create_site(slug: str, name: str) -> None:
         print(f"sito {name}: {site.id}")
 
 
-async def create_token(slug: str, site_name: str, note: str | None) -> None:
+async def create_token(slug: str, site_name: str, note: str | None, uses: int, hours: int | None) -> None:
     async with SessionLocal() as session:
         tenant = await tenant_by_slug(session, slug)
         site = await session.scalar(select(Site).where(Site.tenant_id == tenant.id, Site.name == site_name))
         if site is None:
             sys.exit(f"sito '{site_name}' non trovato")
         plain = secrets.token_urlsafe(32)
-        expires = utcnow() + timedelta(hours=settings.enroll_token_ttl_hours)
+        expires = utcnow() + timedelta(hours=hours or settings.enroll_token_ttl_hours)
         session.add(EnrollmentToken(
             tenant_id=tenant.id, site_id=site.id, token_hash=hash_token(plain), note=note, expires_at=expires,
+            max_uses=uses,
         ))
         audit(session, "enrollment_token.create", tenant_id=tenant.id, target=str(site.id), via="cli")
         await session.commit()
-        print(f"token (valido fino a {expires:%Y-%m-%d %H:%M} UTC, mostrato una sola volta):\n{plain}")
+        print(f"token per {uses} dispositivi (valido fino a {expires:%Y-%m-%d %H:%M} UTC, mostrato una sola volta):\n{plain}")
 
 
 async def reset_totp(email: str) -> None:
@@ -126,6 +127,8 @@ def main() -> None:
     k.add_argument("tenant_slug")
     k.add_argument("site_name")
     k.add_argument("--note")
+    k.add_argument("--uses", type=int, default=1)
+    k.add_argument("--hours", type=int)
     r = sub.add_parser("reset-totp")
     r.add_argument("email")
     args = p.parse_args()
@@ -144,7 +147,7 @@ def main() -> None:
         case "create-site":
             asyncio.run(create_site(args.tenant_slug, args.name))
         case "create-token":
-            asyncio.run(create_token(args.tenant_slug, args.site_name, args.note))
+            asyncio.run(create_token(args.tenant_slug, args.site_name, args.note, args.uses, args.hours))
         case "reset-totp":
             asyncio.run(reset_totp(args.email))
 

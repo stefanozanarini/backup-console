@@ -24,6 +24,12 @@ packaging/qpkg/build.sh 0.1.0 agent/dist dist/qpkg
 
 ### Installazione su un NAS
 
+Il modo più semplice: in console, **Tenant e siti → Nuovo token di installazione**, poi incollare
+via SSH il comando "NAS QNAP". Scarica il QPKG giusto dalla console, lo installa e registra
+l'agente. Serve comunque il passo 1 (app non firmate).
+
+A mano:
+
 1. **App Center → Impostazioni → Generale**: abilitare "Consenti l'installazione di
    applicazioni senza firma digitale valida". Il pacchetto non è firmato da QNAP; per
    firmarlo serve aderire al programma di code signing QNAP.

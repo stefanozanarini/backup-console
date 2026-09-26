@@ -105,7 +105,8 @@ Copia l'eseguibile in `C:\Program Files\BackupConsoleAgent`, registra l'agente (
 chiave e log in `C:\ProgramData\BackupConsoleAgent`, accessibile solo a SYSTEM e Administrators)
 e crea il servizio **Backup Console Agent**, con avvio automatico e riavvio in caso di uscita.
 L'esecuzione remota è attiva: per disattivarla aggiungere `-disable-remote-exec`. Per rimuovere
-l'agente: `bc-agent.exe uninstall [-purge]`.
+l'agente: `bc-agent.exe uninstall [-purge]`. Rilanciare `install` su una macchina già registrata
+aggiorna binario e servizio ma mantiene la registrazione (`-reenroll` per forzarne una nuova).
 
 ## Rilasci firmati
 
@@ -120,14 +121,39 @@ Il comando stampa la chiave pubblica. Da impostare in tre posti:
 - **GitHub → Environment `agent-release` → Secrets**: `AGENT_RELEASE_SIGNING_KEY` = contenuto di `release-signing.key`;
 - **console** (facoltativo, controllo anticipato): `BC_RELEASE_PUBLIC_KEY` nel `.env`.
 
-Un rilascio parte con un tag `agent-v0.2.0`: la CI compila, firma e pubblica una GitHub Release.
-Binari e `manifest.json` si caricano poi in console da **Aggiornamenti agente**.
+Un rilascio parte con un tag `agent-v0.2.0`: la CI compila, crea i QPKG, firma tutto e pubblica
+una GitHub Release. Binari, QPKG e `manifest.json` si caricano poi in console da
+**Aggiornamenti agente**. Da quel momento sono anche la versione scaricata dai comandi di
+installazione.
 
 I binari compilati senza chiave pubblica (build locali) rifiutano gli aggiornamenti remoti. In
 sviluppo si può usare `enroll -allow-unsigned-upgrades`.
 
 Con `bc-agent collect` si stampano i dati raccolti senza inviarli: utile per validare
 i parser su un QNAP reale.
+
+## Onboarding dei dispositivi
+
+1. **Tenant e siti → Nuovo token di installazione** sul sito del dispositivo. Scegliere:
+   - "Un dispositivo", oppure "Rollout su più dispositivi" con il numero massimo;
+   - la validità;
+   - una nota, che poi compare in Approvazioni.
+2. La console mostra i comandi da copiare. Scaricano l'ultima versione caricata in
+   **Aggiornamenti agente** usando il token (nessun file da copiare a mano) e registrano il
+   dispositivo:
+   - **Windows** (server Veeam, PC): script PowerShell da eseguire come amministratore.
+     È idempotente: se il servizio esiste già non fa nulla, quindi va bene anche come script di
+     avvio GPO o come script Intune, insieme a un token multiuso;
+   - **QNAP**: comando SSH che sceglie il QPKG in base a `uname -m`, lo installa e registra
+     l'agente. Per ARMv7 viene usato `arm-x41` (Annapurna AL-212/314).
+3. **Approvazioni**: controllare nome, tenant, IP e nota del token, poi approvare (anche più
+   dispositivi insieme).
+4. Il token si revoca quando il rollout è finito. Gli agenti già registrati non sono toccati.
+
+Da CLI: `python -m app.cli create-token <tenant> "<sito>" --note "Rollout GPO" --uses 50 --hours 72`.
+
+Per un'installazione manuale, i file si scaricano da **Aggiornamenti agente** (clic sulla
+piattaforma).
 
 ## Produzione (VM Azure)
 

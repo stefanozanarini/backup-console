@@ -2,7 +2,6 @@
 
 import hashlib
 import json
-import re
 import secrets
 import uuid
 from datetime import timedelta
@@ -17,7 +16,10 @@ from app.api.agent.routes import client_ip
 from app.auth import CurrentUser, CurrentUserDep
 from app.config import settings
 from app.db import get_session
+from fastapi.responses import FileResponse
+
 from app.models import (
+    PACKAGES,
     PLATFORMS,
     Agent,
     AgentStatus,
@@ -50,7 +52,7 @@ from app.schemas.ui import (
 from app.services import secrets as secret_store
 from app.services import totp
 from app.services.audit import audit
-from app.services.releases import VERSION_RE, asset_path, sha256_hex, verify_signature
+from app.services.releases import VERSION_RE, asset_key, asset_path, download_name, sha256_hex, verify_signature
 
 router = APIRouter(prefix="/api/v1", tags=["console"])
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
@@ -214,7 +216,7 @@ async def upload_release(
     session: SessionDep,
     request: Request,
     manifest: Annotated[UploadFile, File(description="manifest.json prodotto da `bc-release sign`")],
-    files: Annotated[list[UploadFile], File(description="binari bc-agent-<piattaforma>[.exe]")],
+    files: Annotated[list[UploadFile], File(description="binari bc-agent-<piattaforma>[.exe] e QPKG")],
     notes: Annotated[str | None, Form(max_length=2000)] = None,
 ):
     user.require_superadmin()
@@ -231,10 +233,12 @@ async def upload_release(
 
     uploaded: dict[str, bytes] = {}
     for f in files:
-        m = re.fullmatch(r"bc-agent-([a-z0-9-]+?)(\.exe)?", f.filename or "")
-        if not m or m.group(1) not in PLATFORMS:
+        key = asset_key(f.filename or "")
+        if key is None or key not in (*PLATFORMS, *PACKAGES):
             raise HTTPException(status.HTTP_400_BAD_REQUEST, f"nome file non riconosciuto: {f.filename}")
-        uploaded[m.group(1)] = await f.read()
+        if key.startswith("qpkg-") and f"_{version}_" not in (f.filename or ""):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"{f.filename}: versione diversa da {version}")
+        uploaded[key] = await f.read()
     if not uploaded:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "nessun binario")
 
@@ -262,6 +266,16 @@ async def upload_release(
     await session.commit()
     return ReleaseOut(version=version, notes=notes, created_at=utcnow(),
                       assets=[ReleaseAssetOut.model_validate(a) for a in assets], agents=0)
+
+
+@router.get("/releases/{version}/assets/{key}")
+async def download_asset(version: str, key: str, user: CurrentUserDep, session: SessionDep):
+    """Download manuale di un binario o di un QPKG dalla console."""
+    asset = await session.get(ReleaseAsset, (version, key))
+    path = asset_path(version, key)
+    if asset is None or not path.is_file():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "non trovato")
+    return FileResponse(path, media_type="application/octet-stream", filename=download_name(version, key))
 
 
 def device_platform(device: Device) -> str:

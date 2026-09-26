@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { api, useApi } from "../api";
+import { api, downloadFile, useApi } from "../api";
 import { Empty, ErrorBox } from "../components";
 import { useConsole } from "../context";
 import { bytes, dateTime } from "../format";
@@ -84,7 +84,14 @@ export default function Upgrades() {
             {(releases.data ?? []).map((r) => (
               <tr key={r.version}>
                 <td className="mono">{r.version}</td>
-                <td>{r.assets.map((a) => <span key={a.platform} className="chip" title={`${bytes(a.size)} · sha256 ${a.sha256}`}>{a.platform}</span>)}</td>
+                <td>
+                  {r.assets.map((a) => (
+                    <button key={a.platform} className="chip chip-btn" title={`Scarica · ${bytes(a.size)} · sha256 ${a.sha256}`}
+                      onClick={() => downloadFile(`/releases/${r.version}/assets/${a.platform}`, a.platform).catch((e: Error) => setError(e))}>
+                      ⭳ {a.platform}
+                    </button>
+                  ))}
+                </td>
                 <td className="nowrap muted">{dateTime(r.created_at)}</td>
                 <td className="num">{r.agents}</td>
                 <td className="muted">{r.notes}</td>
@@ -136,13 +143,14 @@ function UploadRelease({ onDone }: { onDone: () => void }) {
       <h2>Carica rilascio</h2>
       <form className="stack" onSubmit={submit}>
         <div className="notice">
-          Binari e <code>manifest.json</code> prodotti da <code>bc-release sign</code> (CI). L'agente installa solo
-          binari firmati con la chiave incorporata al momento della build.
+          File della GitHub Release (binari, QPKG e <code>manifest.json</code> prodotti da <code>bc-release sign</code>).
+          L'agente installa solo binari firmati con la chiave incorporata al momento della build; l'ultima versione
+          caricata è quella scaricata dai comandi di installazione.
         </div>
         <label className="field">manifest.json
           <input type="file" accept=".json,application/json" required onChange={(e) => setManifest(e.target.files?.[0] ?? null)} />
         </label>
-        <label className="field">Binari (bc-agent-linux-amd64, …-windows-amd64.exe)
+        <label className="field">Binari e QPKG (bc-agent-linux-amd64, …-windows-amd64.exe, BackupConsoleAgent_*.qpkg)
           <input type="file" multiple required onChange={(e) => setFiles(e.target.files)} />
         </label>
         <label className="field">Note

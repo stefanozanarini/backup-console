@@ -6,8 +6,8 @@
 //	    -ldflags "-X backupconsole/agent/internal/upgrade.PublicKey=<pubblica>"
 //
 //	bc-release sign -key release-signing.key -version 0.2.0 dist/
-//	    firma i binari bc-agent-<piattaforma>[.exe] in dist/ e scrive dist/manifest.json,
-//	    da caricare in console insieme ai binari.
+//	    firma i binari bc-agent-<piattaforma>[.exe] e i QPKG della stessa versione in dist/
+//	    e scrive dist/manifest.json, da caricare in console insieme ai file.
 package main
 
 import (
@@ -27,7 +27,11 @@ import (
 	"strings"
 )
 
-var assetRe = regexp.MustCompile(`^bc-agent-((linux|windows)-(amd64|arm64|armv7))(\.exe)?$`)
+var (
+	assetRe = regexp.MustCompile(`^bc-agent-((linux|windows)-(amd64|arm64|armv7))(\.exe)?$`)
+	// I QPKG servono solo per l'installazione (download dalla console), non per gli aggiornamenti.
+	qpkgRe = regexp.MustCompile(`^BackupConsoleAgent_(.+)_(x86_64|arm_64|arm-x41|arm-x31)\.qpkg$`)
+)
 
 type asset struct {
 	SHA256    string `json:"sha256"`
@@ -101,8 +105,15 @@ func sign(priv ed25519.PrivateKey, version, dir string) {
 	}
 	m := manifest{Version: version, Assets: map[string]asset{}}
 	for _, e := range entries {
-		match := assetRe.FindStringSubmatch(e.Name())
-		if e.IsDir() || match == nil {
+		if e.IsDir() {
+			continue
+		}
+		var key string
+		if m := assetRe.FindStringSubmatch(e.Name()); m != nil {
+			key = m[1]
+		} else if m := qpkgRe.FindStringSubmatch(e.Name()); m != nil && m[1] == version {
+			key = "qpkg-" + m[2]
+		} else {
 			continue
 		}
 		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
@@ -110,7 +121,7 @@ func sign(priv ed25519.PrivateKey, version, dir string) {
 			log.Fatal(err)
 		}
 		sum := sha256.Sum256(data)
-		m.Assets[match[1]] = asset{
+		m.Assets[key] = asset{
 			SHA256: hex.EncodeToString(sum[:]), Size: int64(len(data)),
 			Signature: base64.StdEncoding.EncodeToString(ed25519.Sign(priv, data)),
 		}

@@ -60,8 +60,17 @@ class Agent(UUIDPk, Base):
     approved_at: Mapped[datetime | None]
     last_seen_at: Mapped[datetime | None]
     last_ip: Mapped[str | None] = mapped_column(String(64))
+    # Token con cui si è registrato: la sua nota aiuta a riconoscere il rollout in Approvazioni.
+    enrollment_token_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("enrollment_tokens.id", ondelete="SET NULL")
+    )
 
     device: Mapped[Device] = relationship(back_populates="agent")
+    enrollment_token: Mapped["EnrollmentToken | None"] = relationship(lazy="selectin")
+
+    @property
+    def enrollment_note(self) -> str | None:
+        return self.enrollment_token.note if self.enrollment_token else None
 
 
 class EnrollmentToken(UUIDPk, Base):
@@ -73,6 +82,14 @@ class EnrollmentToken(UUIDPk, Base):
     token_hash: Mapped[str] = mapped_column(String(64), unique=True)
     note: Mapped[str | None] = mapped_column(String(200))
     expires_at: Mapped[datetime]
-    used_at: Mapped[datetime | None]
+    # Token multiuso per i rollout (GPO, Intune, script): ogni enrollment consuma un utilizzo.
+    max_uses: Mapped[int] = mapped_column(default=1)
+    uses: Mapped[int] = mapped_column(default=0)
+    used_at: Mapped[datetime | None]  # ultimo utilizzo
+    revoked_at: Mapped[datetime | None]
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+def token_usable(token: "EnrollmentToken", now: datetime) -> bool:
+    return token.revoked_at is None and token.expires_at > now and token.uses < token.max_uses

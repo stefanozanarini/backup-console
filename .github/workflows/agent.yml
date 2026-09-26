@@ -105,11 +105,9 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#agent-v}"
           mkdir -p release
-          cp artifacts/bc-agent-*/bc-agent-* release/
+          cp artifacts/bc-agent-*/bc-agent-* artifacts/qpkg/*.qpkg release/
           cd agent && go run ./cmd/bc-release sign -version "$VERSION" ../release
       - uses: softprops/action-gh-release@v2
         with:
-          files: |
-            release/*
-            artifacts/qpkg/*
+          files: release/*
       # TODO: firma Authenticode dell'exe Windows (Azure Trusted Signing) e MSI.

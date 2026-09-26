@@ -60,11 +60,31 @@ class SiteOut(ORM):
 
 class TokenCreate(BaseModel):
     note: str | None = Field(default=None, max_length=200)
+    # 1 = singolo dispositivo; >1 per rollout via GPO/Intune/script.
+    max_uses: int = Field(1, ge=1, le=500)
+    valid_hours: int | None = Field(default=None, ge=1, le=24 * 14)
 
 
 class TokenOut(BaseModel):
+    id: uuid.UUID
     token: str  # mostrato una sola volta
     expires_at: datetime
+    max_uses: int
+
+
+class TokenInfo(ORM):
+    id: uuid.UUID
+    site_id: uuid.UUID
+    note: str | None
+    uses: int
+    max_uses: int
+    expires_at: datetime
+    used_at: datetime | None
+    created_at: datetime
+
+
+class BulkApprove(BaseModel):
+    agent_ids: list[uuid.UUID] = Field(min_length=1, max_length=500)
 
 
 class AgentOut(ORM):
@@ -77,6 +97,7 @@ class AgentOut(ORM):
     cert_not_after: datetime
     enrolled_at: datetime
     approved_at: datetime | None
+    enrollment_note: str | None = None
 
 
 class DeviceOut(ORM):

@@ -25,11 +25,12 @@ func installDir() string {
 }
 
 // install copia l'eseguibile in Program Files, registra l'agente e crea il servizio.
-// Rilanciato su una macchina già installata aggiorna il binario e riavvia il servizio
-// (senza -token non rifà l'enrollment).
+// È idempotente: rilanciato su una macchina già registrata (es. script di avvio GPO)
+// aggiorna binario e servizio ma mantiene la registrazione, salvo -reenroll.
 func install(args []string) error {
 	fs := flag.NewFlagSet("install", flag.ExitOnError)
 	o := enrollFlags(fs)
+	reenroll := fs.Bool("reenroll", false, "registra di nuovo anche se esiste già una registrazione (nuova identità)")
 	_ = fs.Parse(args)
 
 	dataDir := filepath.Dir(o.cfgPath)
@@ -55,7 +56,8 @@ func install(args []string) error {
 		}
 	}
 
-	if _, err := os.Stat(o.cfgPath); err != nil || o.token != "" {
+	_, statErr := os.Stat(o.cfgPath)
+	if registered := statErr == nil; !registered || *reenroll {
 		if o.token == "" {
 			return errors.New("prima installazione: -server e -token sono obbligatori")
 		}

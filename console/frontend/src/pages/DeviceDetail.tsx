@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, useApi } from "../api";
+import { api, notifyChange, useApi } from "../api";
 import { ConnectivityBadge, Empty, ErrorBox, SeverityBadge, StateBadge, UsageBar } from "../components";
 import { useConsole } from "../context";
 import { AGENT_STATUS_LABEL, ago, bytes, connectivity, dateTime, KIND_LABEL } from "../format";
@@ -51,6 +51,7 @@ export default function DeviceDetailPage() {
     try {
       await api(`/agents/${d.agent.id}/${action}`, { method: "POST" });
       await device.reload();
+      notifyChange();
     } catch (e) {
       setActionError(e as Error);
     }

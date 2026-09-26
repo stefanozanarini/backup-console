@@ -1,8 +1,8 @@
 from app.models.audit import AuditLog
 from app.models.base import Base
 from app.models.commands import FINAL_STATUSES, MAX_OUTPUT, Command, CommandStatus, CommandType
-from app.models.device import Agent, AgentStatus, Device, DeviceKind, EnrollmentToken
-from app.models.releases import PLATFORMS, Release, ReleaseAsset
+from app.models.device import Agent, AgentStatus, Device, DeviceKind, EnrollmentToken, token_usable
+from app.models.releases import PACKAGES, PLATFORMS, Release, ReleaseAsset
 from app.models.problems import CheckRule, Problem, ProblemState, Severity
 from app.models.telemetry import AgentMessage, Event, InventorySnapshot, Metric
 from app.models.tenancy import Elevation, Role, RoleAssignment, Site, Tenant, User
@@ -11,7 +11,9 @@ from app.models.veeam import VeeamJob
 __all__ = [
     "FINAL_STATUSES",
     "MAX_OUTPUT",
+    "PACKAGES",
     "PLATFORMS",
+    "token_usable",
     "Command",
     "CommandStatus",
     "CommandType",

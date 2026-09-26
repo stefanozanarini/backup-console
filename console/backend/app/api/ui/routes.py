@@ -28,6 +28,7 @@ from app.models import (
     Site,
     Tenant,
     User,
+    token_usable,
 )
 from app.models.base import utcnow
 from app.schemas.ui import (
@@ -40,7 +41,9 @@ from app.schemas.ui import (
     SiteOut,
     TenantCreate,
     TenantOut,
+    BulkApprove,
     TokenCreate,
+    TokenInfo,
     TokenOut,
     UserCreate,
 )
@@ -152,14 +155,44 @@ async def create_enrollment_token(
         site_id=site.id,
         token_hash=hash_token(plain),
         note=body.note,
-        expires_at=utcnow() + timedelta(hours=settings.enroll_token_ttl_hours),
+        max_uses=body.max_uses,
+        expires_at=utcnow() + timedelta(hours=body.valid_hours or settings.enroll_token_ttl_hours),
         created_by=user.id,
     )
     session.add(token)
+    await session.flush()
     audit(session, "enrollment_token.create", user_id=user.id, tenant_id=site.tenant_id,
-          target=str(site.id), ip=client_ip(request), note=body.note)
+          target=str(site.id), ip=client_ip(request), note=body.note, max_uses=body.max_uses)
     await session.commit()
-    return TokenOut(token=plain, expires_at=token.expires_at)
+    return TokenOut(id=token.id, token=plain, expires_at=token.expires_at, max_uses=token.max_uses)
+
+
+@router.get("/sites/{site_id}/enrollment-tokens", response_model=list[TokenInfo])
+async def list_enrollment_tokens(site_id: uuid.UUID, user: CurrentUserDep, session: SessionDep):
+    """Token ancora utilizzabili del sito (non scaduti, non esauriti, non revocati)."""
+    site = await session.get(Site, site_id)
+    if site is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "non trovato")
+    user.require_read(site.tenant_id)
+    now = utcnow()
+    rows = await session.scalars(
+        select(EnrollmentToken)
+        .where(EnrollmentToken.site_id == site_id, EnrollmentToken.expires_at > now)
+        .order_by(EnrollmentToken.created_at.desc())
+    )
+    return [t for t in rows if token_usable(t, now)]
+
+
+@router.post("/enrollment-tokens/{token_id}/revoke", status_code=204)
+async def revoke_enrollment_token(token_id: uuid.UUID, user: CurrentUserDep, session: SessionDep, request: Request):
+    token = await session.get(EnrollmentToken, token_id)
+    if token is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "non trovato")
+    user.require_write(token.tenant_id)
+    token.revoked_at = utcnow()
+    audit(session, "enrollment_token.revoke", user_id=user.id, tenant_id=token.tenant_id,
+          target=str(token.id), ip=client_ip(request), note=token.note, uses=token.uses)
+    await session.commit()
 
 
 # --- dispositivi e agenti -------------------------------------------------
@@ -256,6 +289,26 @@ async def _set_agent_status(
 @router.post("/agents/{agent_id}/approve", status_code=204)
 async def approve_agent(agent_id: uuid.UUID, user: CurrentUserDep, session: SessionDep, request: Request):
     await _set_agent_status(agent_id, AgentStatus.APPROVED, user, session, request)
+
+
+@router.post("/agents/approve")
+async def approve_agents(body: BulkApprove, user: CurrentUserDep, session: SessionDep, request: Request):
+    """Approvazione in blocco (es. dopo un rollout con token multiuso)."""
+    agents = (
+        await session.scalars(
+            select(Agent).where(Agent.id.in_(body.agent_ids)).options(selectinload(Agent.device))
+        )
+    ).all()
+    approved = 0
+    for agent in agents:
+        if agent.status != AgentStatus.PENDING or not user.can_write(agent.device.tenant_id):
+            continue
+        agent.status, agent.approved_at = AgentStatus.APPROVED, utcnow()
+        audit(session, "agent.approve", user_id=user.id, agent_id=agent.id, tenant_id=agent.device.tenant_id,
+              target=agent.device.name, ip=client_ip(request), bulk=True)
+        approved += 1
+    await session.commit()
+    return {"approved": approved}
 
 
 @router.post("/agents/{agent_id}/revoke", status_code=204)

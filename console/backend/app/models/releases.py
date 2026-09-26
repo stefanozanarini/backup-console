@@ -8,6 +8,8 @@ from app.models.base import Base, utcnow
 
 # Piattaforme riconosciute: devono coincidere con agent/internal/upgrade.Platform().
 PLATFORMS = ("linux-amd64", "linux-arm64", "linux-armv7", "windows-amd64")
+# Pacchetti di installazione (non usati dagli aggiornamenti, solo per il download).
+PACKAGES = ("qpkg-x86_64", "qpkg-arm_64", "qpkg-arm-x41", "qpkg-arm-x31")
 
 
 class Release(Base):
