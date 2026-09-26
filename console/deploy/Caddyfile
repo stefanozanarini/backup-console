@@ -1,0 +1,55 @@
+{
+	email {$ACME_EMAIL}
+}
+
+# Endpoint agenti: TLS pubblico (Let's Encrypt) + certificato client firmato dalla CA agenti.
+# "verify_if_given" perché /enroll arriva ancora senza certificato; tutti gli altri
+# endpoint sono rifiutati dal backend se manca il fingerprint.
+{$AGENTS_HOST} {
+	tls {
+		client_auth {
+			mode verify_if_given
+			trust_pool file /ca/agent-ca.crt
+		}
+	}
+
+	@agent path /agent/v1/*
+	handle @agent {
+		reverse_proxy api:8000 {
+			# Sovrascrive qualsiasi valore inviato dal client.
+			header_up X-Client-Cert-Fingerprint {http.request.tls.client.fingerprint}
+		}
+	}
+	handle {
+		respond 404
+	}
+}
+
+# Console utenti: API + (in seguito) frontend statico.
+{$CONSOLE_HOST} {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy no-referrer
+	}
+
+	# Gli endpoint agenti non sono raggiungibili da questo host.
+	@agent path /agent/*
+	handle @agent {
+		respond 404
+	}
+
+	@api path /api/* /docs /openapi.json
+	handle @api {
+		reverse_proxy api:8000 {
+			header_up -X-Client-Cert-Fingerprint
+			header_up -X-Dev-User
+		}
+	}
+
+	handle {
+		# TODO: servire la build del frontend (root * /srv/frontend; file_server).
+		respond "Backup Console" 200
+	}
+}

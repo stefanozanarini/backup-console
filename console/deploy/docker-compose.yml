@@ -1,0 +1,87 @@
+# Console Backup: docker compose --env-file .env up -d
+# Solo Caddy espone porte; api, worker e db stanno sulla rete interna.
+name: backup-console
+
+x-backend: &backend
+  image: ${BACKEND_IMAGE:-ghcr.io/stefanozanarini/backup-console-backend:latest}
+  build: ../backend
+  restart: unless-stopped
+  environment:
+    BC_DATABASE_URL: postgresql+asyncpg://bc:${POSTGRES_PASSWORD}@db:5432/bc
+    BC_CA_DIR: /data/ca
+    BC_AUTH_MODE: ${BC_AUTH_MODE:-oidc}
+    BC_OIDC_ISSUER: ${BC_OIDC_ISSUER:-}
+    BC_OIDC_AUDIENCE: ${BC_OIDC_AUDIENCE:-}
+    BC_OIDC_JWKS_URL: ${BC_OIDC_JWKS_URL:-}
+  volumes:
+    - agent_ca:/data/ca
+  networks: [internal]
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: bc
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?imposta POSTGRES_PASSWORD}
+      POSTGRES_DB: bc
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bc -d bc"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [internal]
+
+  # Migrazioni + creazione CA agenti, poi termina. Caddy parte solo dopo,
+  # perché ha bisogno di agent-ca.crt per verificare i certificati client.
+  init:
+    <<: *backend
+    restart: "no"
+    command: ["python", "-m", "app.cli", "init"]
+    depends_on:
+      db: { condition: service_healthy }
+
+  api:
+    <<: *backend
+    depends_on:
+      init: { condition: service_completed_successfully }
+    # "public" solo per l'uscita verso Entra ID (JWKS): nessuna porta pubblicata.
+    networks: [internal, public]
+
+  worker:
+    <<: *backend
+    command: ["python", "-m", "app.worker"]
+    depends_on:
+      init: { condition: service_completed_successfully }
+
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    environment:
+      CONSOLE_HOST: ${CONSOLE_HOST:?imposta CONSOLE_HOST}
+      AGENTS_HOST: ${AGENTS_HOST:?imposta AGENTS_HOST}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    volumes:
+      - ./${CADDYFILE:-Caddyfile}:/etc/caddy/Caddyfile:ro
+      - agent_ca:/ca:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      init: { condition: service_completed_successfully }
+    networks: [internal, public]
+
+volumes:
+  pgdata:
+  agent_ca:
+  caddy_data:
+  caddy_config:
+
+networks:
+  internal:
+    internal: true
+  public:

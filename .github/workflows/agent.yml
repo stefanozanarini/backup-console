@@ -1,0 +1,62 @@
+name: agent
+
+on:
+  push:
+    branches: [main]
+    tags: ["agent-v*"]
+    paths: ["agent/**", ".github/workflows/agent.yml"]
+  pull_request:
+    paths: ["agent/**", ".github/workflows/agent.yml"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
+      - run: go vet ./...
+      - run: go test ./...
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64, name: linux-amd64 }   # QNAP x86_64
+          - { goos: linux, goarch: arm64, name: linux-arm64 }   # QNAP ARM64 (AL-324, ...)
+          - { goos: linux, goarch: arm, goarm: "7", name: linux-armv7 }  # QNAP ARMv7 (AL-212/314, ...)
+          - { goos: windows, goarch: amd64, name: windows-amd64 }  # server Veeam e PC
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+          CGO_ENABLED: "0"
+        run: |
+          VERSION="${GITHUB_REF_NAME#agent-v}"
+          [ "${GITHUB_REF_TYPE}" = tag ] || VERSION="0.0.0-${GITHUB_SHA::8}"
+          EXT=""; [ "$GOOS" = windows ] && EXT=".exe"
+          mkdir -p dist
+          go build -trimpath -ldflags "-s -w -X backupconsole/agent/internal/version.Version=${VERSION}" \
+            -o "dist/bc-agent-${{ matrix.name }}${EXT}" ./cmd/bc-agent
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bc-agent-${{ matrix.name }}
+          path: agent/dist/*
+      # TODO fase 4: QPKG (QDK), MSI (WiX, runner windows), firma Authenticode
+      # (Azure Trusted Signing), manifest firmato Ed25519 in un Environment protetto.

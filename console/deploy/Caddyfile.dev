@@ -1,0 +1,44 @@
+# Sviluppo locale: certificati dalla CA interna di Caddy (console.localhost, agents.localhost).
+{
+	local_certs
+}
+
+{$AGENTS_HOST} {
+	tls internal {
+		client_auth {
+			mode verify_if_given
+			trust_pool file /ca/agent-ca.crt
+		}
+	}
+
+	@agent path /agent/v1/*
+	handle @agent {
+		reverse_proxy api:8000 {
+			header_up X-Client-Cert-Fingerprint {http.request.tls.client.fingerprint}
+		}
+	}
+	handle {
+		respond 404
+	}
+}
+
+{$CONSOLE_HOST} {
+	tls internal
+
+	# Gli endpoint agenti non sono raggiungibili da questo host.
+	@agent path /agent/*
+	handle @agent {
+		respond 404
+	}
+
+	@api path /api/* /docs /openapi.json
+	handle @api {
+		reverse_proxy api:8000 {
+			header_up -X-Client-Cert-Fingerprint
+		}
+	}
+
+	handle {
+		respond "Backup Console (dev)" 200
+	}
+}

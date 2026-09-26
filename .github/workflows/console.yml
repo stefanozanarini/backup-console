@@ -1,0 +1,64 @@
+name: console
+
+on:
+  push:
+    branches: [main]
+    paths: ["console/**", ".github/workflows/console.yml"]
+  pull_request:
+    paths: ["console/**", ".github/workflows/console.yml"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: bc
+          POSTGRES_PASSWORD: bc
+          POSTGRES_DB: bc_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U bc" --health-interval 5s --health-timeout 3s --health-retries 20
+    defaults:
+      run:
+        working-directory: console/backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e '.[dev]'
+      - run: pytest -q
+        env:
+          BC_TEST_DATABASE_URL: postgresql+asyncpg://bc:bc@localhost:5432/bc_test
+      - name: Migrazioni allineate ai modelli
+        env:
+          BC_DATABASE_URL: postgresql+asyncpg://bc:bc@localhost:5432/bc_test
+        run: |
+          psql postgresql://bc:bc@localhost:5432/bc_test -c "drop schema public cascade; create schema public;"
+          alembic upgrade head
+          alembic check
+
+  image:
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: console/backend
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/backup-console-backend:latest
+            ghcr.io/${{ github.repository_owner }}/backup-console-backend:${{ github.sha }}
+      # TODO: job di deploy sulla VM (SSH con chiave limitata a "docker compose pull && up -d")

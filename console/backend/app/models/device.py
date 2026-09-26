@@ -1,0 +1,76 @@
+import uuid
+from datetime import datetime
+from enum import StrEnum
+from typing import Any
+
+from sqlalchemy import ForeignKey, String
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.models.base import Base, UUIDPk, utcnow
+
+
+class DeviceKind(StrEnum):
+    NAS = "nas"
+    SERVER = "server"
+    PC = "pc"
+
+
+class AgentStatus(StrEnum):
+    PENDING = "pending"  # enrollato, in attesa di approvazione manuale
+    APPROVED = "approved"
+    REVOKED = "revoked"
+
+
+class Device(UUIDPk, Base):
+    __tablename__ = "devices"
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    site_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(16))
+    name: Mapped[str] = mapped_column(String(200))
+    hostname: Mapped[str] = mapped_column(String(255))
+    platform: Mapped[str] = mapped_column(String(32))  # linux / windows
+    arch: Mapped[str] = mapped_column(String(32))
+    # Ruoli rilevati dall'agente: ["qnap"], ["veeam_vbr"], ["veeam_agent"], ...
+    roles: Mapped[list[Any]] = mapped_column(default=list)
+    model: Mapped[str | None] = mapped_column(String(200))
+    serial: Mapped[str | None] = mapped_column(String(200))
+    os_version: Mapped[str | None] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    last_seen_at: Mapped[datetime | None]
+
+    agent: Mapped["Agent | None"] = relationship(back_populates="device", uselist=False)
+
+
+class Agent(UUIDPk, Base):
+    __tablename__ = "agents"
+
+    device_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("devices.id", ondelete="CASCADE"), unique=True)
+    status: Mapped[str] = mapped_column(String(16), default=AgentStatus.PENDING)
+    # SHA-256 (hex) del certificato client; Caddy lo passa nell'header X-Client-Cert-Fingerprint.
+    cert_fingerprint: Mapped[str] = mapped_column(String(64), unique=True)
+    cert_not_after: Mapped[datetime]
+    version: Mapped[str | None] = mapped_column(String(64))
+    capabilities: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    # Deciso in fase di installazione sul dispositivo; la console lo legge soltanto.
+    allow_shell: Mapped[bool] = mapped_column(default=False)
+    enrolled_at: Mapped[datetime] = mapped_column(default=utcnow)
+    approved_at: Mapped[datetime | None]
+    last_seen_at: Mapped[datetime | None]
+    last_ip: Mapped[str | None] = mapped_column(String(64))
+
+    device: Mapped[Device] = relationship(back_populates="agent")
+
+
+class EnrollmentToken(UUIDPk, Base):
+    __tablename__ = "enrollment_tokens"
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    site_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"))
+    # Salviamo solo l'hash: il token in chiaro viene mostrato una volta sola.
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    note: Mapped[str | None] = mapped_column(String(200))
+    expires_at: Mapped[datetime]
+    used_at: Mapped[datetime | None]
+    created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)

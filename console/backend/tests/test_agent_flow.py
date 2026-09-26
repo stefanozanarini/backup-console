@@ -1,0 +1,171 @@
+import uuid
+from datetime import UTC, datetime
+
+from cryptography import x509
+
+from app.api.agent.deps import FINGERPRINT_HEADER
+from tests.conftest import as_user, cert_fingerprint, make_csr
+
+
+def now() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+async def setup_site(client, slug="acme"):
+    r = await client.post("/api/v1/tenants", json={"name": slug.title(), "slug": slug}, headers=as_user())
+    assert r.status_code == 201, r.text
+    tenant_id = r.json()["id"]
+    r = await client.post(f"/api/v1/tenants/{tenant_id}/sites", json={"name": "Sede"}, headers=as_user())
+    assert r.status_code == 201, r.text
+    return tenant_id, r.json()["id"]
+
+
+async def enroll(client, site_id, roles=("qnap",)):
+    r = await client.post(f"/api/v1/sites/{site_id}/enrollment-tokens", json={}, headers=as_user())
+    assert r.status_code == 201, r.text
+    token = r.json()["token"]
+    body = {
+        "token": token, "csr_pem": make_csr(), "hostname": "nas01", "platform": "linux",
+        "arch": "amd64", "agent_version": "0.1.0", "roles": list(roles),
+    }
+    r = await client.post("/agent/v1/enroll", json=body)
+    assert r.status_code == 200, r.text
+    data = r.json()
+    return data, {FINGERPRINT_HEADER: cert_fingerprint(data["cert_pem"])}, token, body
+
+
+def envelope(payload):
+    return {"msg_id": str(uuid.uuid4()), "seq": 1, "ts": now(), "payload": payload}
+
+
+def disk(value, mount="/share/CACHEDEV1_DATA"):
+    return envelope({"metrics": [{"ts": now(), "name": "disk.used_pct", "labels": {"mount": mount}, "value": value}]})
+
+
+async def test_enroll_issues_cert_bound_to_agent_id(client):
+    _, site_id = await setup_site(client)
+    data, _, _, body = await enroll(client, site_id)
+
+    cert = x509.load_pem_x509_certificate(data["cert_pem"].encode())
+    assert cert.subject.rfc4514_string() == f"CN={data['agent_id']}"
+    assert data["status"] == "pending"
+
+    # Il token è monouso.
+    r = await client.post("/agent/v1/enroll", json={**body, "csr_pem": make_csr()})
+    assert r.status_code == 401
+
+
+async def test_pending_agent_cannot_send_data_until_approved(client):
+    _, site_id = await setup_site(client)
+    data, auth, _, _ = await enroll(client, site_id)
+
+    r = await client.post("/agent/v1/heartbeat", json={"version": "0.1.0"}, headers=auth)
+    assert r.status_code == 200 and r.json()["status"] == "pending"
+    assert (await client.post("/agent/v1/metrics", json=disk(50), headers=auth)).status_code == 403
+
+    r = await client.post(f"/api/v1/agents/{data['agent_id']}/approve", headers=as_user())
+    assert r.status_code == 204
+    assert (await client.post("/agent/v1/metrics", json=disk(50), headers=auth)).status_code == 200
+
+
+async def test_unknown_or_missing_certificate_is_rejected(client):
+    r = await client.post("/agent/v1/heartbeat", json={"version": "x"})
+    assert r.status_code == 401
+    r = await client.post("/agent/v1/heartbeat", json={"version": "x"}, headers={FINGERPRINT_HEADER: "ab" * 32})
+    assert r.status_code == 401
+    # Placeholder non risolto o valore arbitrario: trattato come certificato assente.
+    r = await client.post("/agent/v1/heartbeat", json={"version": "x"}, headers={FINGERPRINT_HEADER: "{tls.client}"})
+    assert r.json()["detail"] == "certificato client mancante"
+
+
+async def test_disk_threshold_opens_escalates_and_resolves_problem(client):
+    _, site_id = await setup_site(client)
+    data, auth, _, _ = await enroll(client, site_id)
+    await client.post(f"/api/v1/agents/{data['agent_id']}/approve", headers=as_user())
+
+    await client.post("/agent/v1/metrics", json=disk(88), headers=auth)
+    problems = (await client.get("/api/v1/problems", headers=as_user())).json()
+    assert [(p["check"], p["severity"]) for p in problems] == [("disk.used_pct", "warning")]
+    assert problems[0]["device_name"] == "nas01"
+
+    # Stessa chiave di dedup: aggiorna la riga, non ne crea un'altra.
+    await client.post("/agent/v1/metrics", json=disk(97), headers=auth)
+    problems = (await client.get("/api/v1/problems", headers=as_user())).json()
+    assert [(p["id"], p["severity"]) for p in problems] == [(problems[0]["id"], "critical")]
+
+    await client.post("/agent/v1/metrics", json=disk(40), headers=auth)
+    assert (await client.get("/api/v1/problems", headers=as_user())).json() == []
+    resolved = (await client.get("/api/v1/problems?state=resolved", headers=as_user())).json()
+    assert len(resolved) == 1
+
+
+async def test_duplicate_message_is_ignored(client):
+    _, site_id = await setup_site(client)
+    data, auth, _, _ = await enroll(client, site_id)
+    await client.post(f"/api/v1/agents/{data['agent_id']}/approve", headers=as_user())
+
+    msg = disk(97)
+    assert (await client.post("/agent/v1/metrics", json=msg, headers=auth)).json() == {"accepted": True, "duplicate": False}
+    assert (await client.post("/agent/v1/metrics", json=msg, headers=auth)).json()["duplicate"] is True
+
+
+async def test_revoked_agent_is_locked_out(client):
+    _, site_id = await setup_site(client)
+    data, auth, _, _ = await enroll(client, site_id)
+    await client.post(f"/api/v1/agents/{data['agent_id']}/approve", headers=as_user())
+    await client.post(f"/api/v1/agents/{data['agent_id']}/revoke", headers=as_user())
+
+    r = await client.post("/agent/v1/heartbeat", json={"version": "0.1.0"}, headers=auth)
+    assert r.status_code == 403
+    # Un agente revocato non può essere riapprovato: serve un nuovo enrollment.
+    r = await client.post(f"/api/v1/agents/{data['agent_id']}/approve", headers=as_user())
+    assert r.status_code == 409
+
+
+async def test_tenant_operator_sees_only_own_tenant(client):
+    tenant_a, site_a = await setup_site(client, "alfa")
+    tenant_b, _ = await setup_site(client, "beta")
+    data, auth, _, _ = await enroll(client, site_a)
+    await client.post(f"/api/v1/agents/{data['agent_id']}/approve", headers=as_user())
+    await client.post("/agent/v1/metrics", json=disk(99), headers=auth)
+
+    r = await client.post("/api/v1/users", headers=as_user(), json={
+        "email": "op-beta@example.com", "roles": [{"role": "operator", "tenant_id": tenant_b}],
+    })
+    assert r.status_code == 201, r.text
+    op = as_user("op-beta@example.com")
+
+    assert [t["slug"] for t in (await client.get("/api/v1/tenants", headers=op)).json()] == ["beta"]
+    assert (await client.get("/api/v1/problems", headers=op)).json() == []
+    assert (await client.get(f"/api/v1/devices/{data['device_id']}", headers=op)).status_code == 404
+    assert (await client.post(f"/api/v1/tenants/{tenant_a}/sites", json={"name": "x"}, headers=op)).status_code == 404
+
+    # L'amministratore vede tutto in un'unica lista.
+    summary = (await client.get("/api/v1/problems/summary", headers=as_user())).json()
+    assert [(s["tenant_name"], s["critical"]) for s in summary] == [("Alfa", 1)]
+
+
+async def test_inventory_updates_device(client):
+    _, site_id = await setup_site(client)
+    data, auth, _, _ = await enroll(client, site_id)
+    await client.post(f"/api/v1/agents/{data['agent_id']}/approve", headers=as_user())
+
+    inv = envelope({"model": "TS-873A", "os_version": "QTS 5.2.1", "data": {"volumes": [{"name": "DataVol1"}]}})
+    assert (await client.post("/agent/v1/inventory", json=inv, headers=auth)).status_code == 200
+    device = (await client.get(f"/api/v1/devices/{data['device_id']}", headers=as_user())).json()
+    assert device["model"] == "TS-873A" and device["kind"] == "nas"
+    assert device["inventory"]["data"]["volumes"][0]["name"] == "DataVol1"
+
+
+async def test_offline_worker_skips_pcs(client):
+    from app.worker import check_offline_agents
+
+    _, site_id = await setup_site(client)
+    nas, _, _, _ = await enroll(client, site_id, roles=("qnap",))
+    pc, _, _, _ = await enroll(client, site_id, roles=("veeam_agent",))
+    for a in (nas, pc):
+        await client.post(f"/api/v1/agents/{a['agent_id']}/approve", headers=as_user())
+
+    assert await check_offline_agents() == 1
+    problems = (await client.get("/api/v1/problems", headers=as_user())).json()
+    assert [(p["check"], p["device_id"]) for p in problems] == [("agent.offline", nas["device_id"])]
