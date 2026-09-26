@@ -4,7 +4,9 @@
 #   ./deploy.sh                    aggiorna i file di configurazione e riavvia la versione in .env
 #   ./deploy.sh --version 0.3.0    passa alla versione 0.3.0 (tag console-backup-v0.3.0)
 #   ./deploy.sh --version 0.2.0    ...e allo stesso modo si torna a una versione precedente
-#   ./deploy.sh --edge             aggiorna anche lo stack edge (nginx + certbot)
+#   ./deploy.sh --edge             aggiorna anche nginx: copia in EDGE_DIR il template della
+#                                  console, lo prova in un container usa e getta e solo se
+#                                  valido ricrea nginx (le altre app non restano mai giù)
 #
 # Opzioni per casi particolari:
 #   --no-git      non esegue git pull
@@ -18,8 +20,9 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 CONSOLE="$ROOT/console/deploy"
-EDGE="$ROOT/edge"
 LOG="$ROOT/deploy.log"
+# File di nginx che appartengono alla console (gli altri in EDGE_DIR sono comuni).
+EDGE_APP_FILES="templates/backup-console.conf.template snippets/backup-console-agent.conf"
 
 version="" with_edge=0 do_git=1 do_pull=1 do_backup=1
 while [ $# -gt 0 ]; do
@@ -65,6 +68,7 @@ edge()    { (cd "$EDGE" && docker compose "$@"); }
 # --- controlli preliminari ---------------------------------------------------
 command -v docker >/dev/null || fail "docker non trovato"
 [ -f "$CONSOLE/.env" ] || fail "manca $CONSOLE/.env (partire da .env.example)"
+EDGE="$(env_get EDGE_DIR)"; EDGE="${EDGE:-$ROOT/edge}"
 [ "$with_edge" = 0 ] || [ -f "$EDGE/.env" ] || fail "manca $EDGE/.env"
 
 log "=== deploy avviato da $(whoami)"
@@ -102,7 +106,7 @@ for img in $(console config --images); do
 done
 # --- backup del database (le migrazioni partono al riavvio) -------------------
 if [ "$do_backup" = 1 ] && [ -n "$(console ps -q db 2>/dev/null)" ]; then
-  dir="$(env_get BC_DATA_DIR)"; dir="${dir:-/srv/backup-console}/backup"
+  dir="$(env_get BC_DATA_DIR)"; dir="${dir:-/dati/containers/backup-console/data}/backup"
   [ -w "$dir" ] || fail "$dir non esiste o non è scrivibile (sudo install -d -m 700 -o \$USER $dir), oppure --no-backup"
   backup_file="$dir/pre-deploy-$previous-to-$target-$(date +%Y%m%d-%H%M%S).dump"
   console exec -T db pg_dump -U bc -Fc bc > "$backup_file" || fail "backup del database non riuscito"
@@ -146,11 +150,28 @@ fi
 
 # --- edge -------------------------------------------------------------------
 if [ "$with_edge" = 1 ]; then
-  log "aggiornamento stack edge"
+  log "aggiornamento nginx ($EDGE)"
+  restore=""
+  if [ "$EDGE" != "$ROOT/edge" ]; then
+    stamp="$(date +%Y%m%d-%H%M%S)"
+    for f in $EDGE_APP_FILES; do
+      if ! cmp -s "$ROOT/edge/$f" "$EDGE/$f"; then
+        [ -f "$EDGE/$f" ] && cp "$EDGE/$f" "$EDGE/$f.bak-$stamp" && restore="$restore $f"
+        install -D -m 644 "$ROOT/edge/$f" "$EDGE/$f"
+        log "aggiornato $EDGE/$f"
+      fi
+    done
+  fi
   [ "$do_pull" = 0 ] || edge pull 2>&1 | tail -2 | tee -a "$LOG"
-  edge up -d 2>&1 | tail -2 | tee -a "$LOG" || fail "avvio edge non riuscito"
-  sleep 2
-  edge exec -T nginx nginx -t 2>&1 | tee -a "$LOG" || fail "configurazione nginx non valida"
+  # Prova in un container usa e getta (template renderizzati come all'avvio vero).
+  if ! out="$(edge run --rm --no-deps -T nginx nginx -t 2>&1)"; then
+    echo "$out" | tail -5 | tee -a "$LOG"
+    for f in $restore; do mv "$EDGE/$f.bak-$stamp" "$EDGE/$f"; done
+    fail "configurazione nginx non valida: file ripristinati, nginx in esecuzione non toccato"
+  fi
+  echo "$out" | grep -E "test is successful" | tee -a "$LOG"
+  edge up -d --force-recreate nginx 2>&1 | tail -2 | tee -a "$LOG" || fail "riavvio di nginx non riuscito"
+  edge up -d certbot 2>&1 | tail -1 | tee -a "$LOG"
 fi
 
 # --- controllo dall'esterno, attraverso nginx ---------------------------------

@@ -1,2 +1,4 @@
 dev-ca.crt
 .env
+letsencrypt/
+certbot-www/

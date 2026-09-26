@@ -76,7 +76,7 @@ Altre misure:
 - i container della console non pubblicano porte: si raggiungono solo attraverso nginx sulla
   rete `proxy`;
 - `X-Forwarded-For` viene impostato da nginx con l'IP reale e non accoda valori del client;
-- la CA sta in `/srv/backup-console/ca` sull'host: nginx la monta in sola lettura e legge solo
+- la CA sta in `/dati/containers/backup-console/data/ca` sull'host: nginx la monta in sola lettura e legge solo
   il `.crt`, la chiave è in `0600`.
 
 ### Utenti e tenant

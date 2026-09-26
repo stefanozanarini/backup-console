@@ -22,10 +22,11 @@ x-backend: &backend
     BC_AGENTS_URL: ${BC_PUBLIC_URL:?imposta BC_PUBLIC_URL}
     BC_PROXY_SECRET: ${BC_PROXY_SECRET:?imposta BC_PROXY_SECRET (stesso valore dello stack edge)}
   volumes:
-    # CA degli agenti in una directory dell'host: l'nginx di bordo la monta in sola
-    # lettura per verificare i certificati client (legge solo agent-ca.crt).
-    - ${BC_DATA_DIR:-/srv/backup-console}/ca:/data/ca
-    - releases:/data/releases
+    # Dati persistenti in directory dell'host (BC_DATA_DIR), non in volumi Docker.
+    # La CA degli agenti è montata in sola lettura anche dall'nginx di bordo, per
+    # verificare i certificati client (legge solo agent-ca.crt).
+    - ${BC_DATA_DIR:?imposta BC_DATA_DIR}/ca:/data/ca
+    - ${BC_DATA_DIR}/releases:/data/releases
   networks: [internal]
 
 services:
@@ -37,7 +38,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?imposta POSTGRES_PASSWORD}
       POSTGRES_DB: bc
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - ${BC_DATA_DIR}/postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U bc -d bc"]
       interval: 5s
@@ -85,10 +86,6 @@ services:
       retries: 3
     networks:
       proxy: { aliases: [backup-console-web] }
-
-volumes:
-  pgdata:
-  releases:
 
 networks:
   internal:

@@ -36,7 +36,7 @@ Stessa struttura della VM (stack `edge` con nginx più stack della console), sul
 
 ```bash
 docker network create proxy-dev
-mkdir -p ~/bcdata && docker run --rm -v ~/bcdata:/d alpine sh -c "mkdir -p /d/ca && chown 10001:10001 /d/ca"
+mkdir -p ~/bcdata/backup && docker run --rm -v ~/bcdata:/d alpine sh -c "mkdir -p /d/ca /d/releases && chown 10001:10001 /d/ca /d/releases"
 ```
 
 `console/deploy/.env` (partendo da `.env.example`):

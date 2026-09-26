@@ -23,10 +23,11 @@ services:
       - ./templates:/etc/nginx/templates:ro
       - ./snippets:/etc/nginx/snippets:ro
       - ./reload-loop.sh:/docker-entrypoint.d/90-reload-loop.sh:ro
-      - letsencrypt:/etc/letsencrypt:ro
-      - certbot-webroot:/var/www/certbot:ro
+      # Certificati e webroot della challenge in questa stessa directory.
+      - ./letsencrypt:/etc/letsencrypt:ro
+      - ./certbot-www:/var/www/certbot:ro
       # CA degli agenti della Backup Console (solo agent-ca.crt viene letto).
-      - ${BC_DATA_DIR:-/srv/backup-console}/ca:/etc/nginx/backup-console-ca:ro
+      - ${BC_DATA_DIR:?imposta BC_DATA_DIR}/ca:/etc/nginx/backup-console-ca:ro
     # conf.d viene generata dai template a ogni avvio (niente default.conf dell'immagine).
     tmpfs:
       - /etc/nginx/conf.d
@@ -38,12 +39,8 @@ services:
     restart: unless-stopped
     entrypoint: ["/bin/sh", "-c", "trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done"]
     volumes:
-      - letsencrypt:/etc/letsencrypt
-      - certbot-webroot:/var/www/certbot
-
-volumes:
-  letsencrypt:
-  certbot-webroot:
+      - ./letsencrypt:/etc/letsencrypt
+      - ./certbot-www:/var/www/certbot
 
 networks:
   proxy:
