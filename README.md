@@ -7,9 +7,9 @@ Veeam Agent, con agenti che si collegano solo in uscita. Architettura e decision
 ```
 console/backend   FastAPI + SQLAlchemy + Alembic
 console/deploy    docker-compose, Caddyfile (prod e dev)
-console/frontend  (da fare)
+console/frontend  React + Vite (servito da Caddy)
 agent/            bc-agent in Go (QNAP, Windows)
-packaging/        QPKG e MSI (da fare)
+packaging/        QPKG (QNAP); MSI da fare
 ```
 
 ## Sviluppo backend
@@ -39,9 +39,11 @@ Poi in `.env` impostare:
 ```
 CONSOLE_HOST=console.localhost
 AGENTS_HOST=agents.localhost
+AGENTS_URL_PORT=:18443
 BC_AUTH_MODE=dev
 CADDYFILE=Caddyfile.dev
 BACKEND_IMAGE=backup-console-backend:dev
+CADDY_IMAGE=backup-console-caddy:dev
 HTTPS_PORT=18443
 HTTP_PORT=18080
 ```
@@ -56,6 +58,15 @@ docker compose exec api python -m app.cli create-site demo "Sede principale"
 docker compose exec api python -m app.cli create-token demo "Sede principale"
 docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt ./caddy-root.crt
 ```
+
+Dati di esempio (8 dispositivi su 3 tenant, passando dagli endpoint reali):
+
+```bash
+console/backend/.venv/bin/python console/deploy/dev/seed_demo.py --ca console/deploy/caddy-root.crt
+```
+
+La console è su `https://console.localhost:18443`. Per lo sviluppo del frontend con
+ricarica automatica vedi [console/frontend/README.md](console/frontend/README.md).
 
 Con `BC_AUTH_MODE=dev` l'API accetta l'header `X-Dev-User: <email>` al posto del token
 Entra ID. Documentazione OpenAPI su `https://console.localhost:18443/docs`.
@@ -81,6 +92,8 @@ Approvare l'agente da console (`POST /api/v1/agents/{id}/approve`), poi:
 ```bash
 bc-agent run -config ./agent.json
 ```
+
+Pacchetti QNAP: vedi [packaging/README.md](packaging/README.md).
 
 Con `bc-agent collect` si stampano i dati raccolti senza inviarli: utile per validare
 i parser su un QNAP reale.

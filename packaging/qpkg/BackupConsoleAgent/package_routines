@@ -1,0 +1,17 @@
+######################################################################
+# Hook di installazione/rimozione eseguiti dall'installer QDK.
+#
+# L'installer estrae il pacchetto sopra la directory esistente senza
+# cancellarla: etc/ (agent.json, chiave e certificato) e log/ non fanno
+# parte del pacchetto e quindi sopravvivono agli aggiornamenti.
+######################################################################
+
+PKG_PRE_REMOVE="{
+	\$SYS_QPKG_DIR/bc-agent.sh stop >/dev/null 2>&1
+}"
+
+pkg_post_install(){
+	mkdir -p "$SYS_QPKG_DIR/etc" "$SYS_QPKG_DIR/log"
+	chmod 700 "$SYS_QPKG_DIR/etc"
+	chmod 755 "$SYS_QPKG_DIR/bc-agent" "$SYS_QPKG_DIR/bc-agent.sh"
+}

@@ -35,7 +35,7 @@ connessione. Nei siti non si apre nessuna porta in ingresso.
 | Worker | stesso codice, `python -m app.worker` | offline check; poi notifiche, retention |
 | DB | PostgreSQL 16 | metriche in tabella semplice, partizionamento quando serve |
 | Reverse proxy | Caddy 2.8 | Let's Encrypt, mTLS agenti, header di sicurezza |
-| Frontend | *(da fare)* React/Vite, build statica servita da Caddy | `console/frontend` |
+| Frontend | React + Vite + TypeScript, build inclusa nell'immagine Caddy | `console/frontend` |
 | Agente | Go, binario statico senza dipendenze | `agent/` |
 | Pacchetti | QPKG (QDK) per QNAP, MSI (WiX v5) per Windows | `packaging/` |
 | CI/CD | GitHub Actions, immagini su GHCR | `.github/workflows` |
@@ -166,10 +166,10 @@ console non deve conoscere le versioni.
 
 1. **MVP** *(in corso)*:
    - ✅ enrollment mTLS, heartbeat, inventario, metriche, problemi, multi-tenant;
-   - ⬜ frontend;
+   - ✅ frontend (problemi, dispositivi con grafico storico, approvazioni, tenant e token);
+   - ✅ QPKG per x86_64, arm_64, arm-x41, arm-x31 con supervisore e log;
    - ⬜ login Entra ID end-to-end;
    - ⬜ notifiche email/Teams;
-   - ⬜ QPKG;
    - ⬜ buffer locale nell'agente.
 2. **Veeam**: collector B&R (v11/v12/v13), collector Veeam Agent for Windows, MSI, servizio Windows.
 3. **Esecuzione**: catalogo task, rsync schedulati, comandi custom e shell con sessione elevata.

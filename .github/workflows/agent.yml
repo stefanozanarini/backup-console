@@ -58,5 +58,25 @@ jobs:
         with:
           name: bc-agent-${{ matrix.name }}
           path: agent/dist/*
-      # TODO fase 4: QPKG (QDK), MSI (WiX, runner windows), firma Authenticode
-      # (Azure Trusted Signing), manifest firmato Ed25519 in un Environment protetto.
+
+  qpkg:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bc-agent-linux-*
+          path: bin
+          merge-multiple: true
+      - name: Build QPKG (QDK)
+        run: |
+          VERSION="${GITHUB_REF_NAME#agent-v}"
+          [ "${GITHUB_REF_TYPE}" = tag ] || VERSION="0.0.0.${GITHUB_RUN_NUMBER}"
+          packaging/qpkg/build.sh "$VERSION" bin dist/qpkg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qpkg
+          path: dist/qpkg/*
+      # TODO fase 4: MSI (WiX, runner windows), firma Authenticode (Azure Trusted
+      # Signing), manifest firmato Ed25519 in un Environment protetto, GitHub Release.

@@ -1,0 +1,10 @@
+# Ambiente di build QPKG: QDK ufficiale QNAP su Ubuntu.
+FROM ubuntu:24.04
+ARG QDK_REF=master
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git ca-certificates make gcc libc6-dev bsdmainutils rsync imagemagick librsvg2-bin \
+ && git clone --depth 1 --branch "$QDK_REF" https://github.com/qnap-dev/QDK.git /tmp/QDK \
+ && cd /tmp/QDK && ./InstallToUbuntu.sh install \
+ && rm -rf /tmp/QDK /var/lib/apt/lists/*
+ENV PATH="/usr/share/QDK/bin:${PATH}"
+WORKDIR /work
