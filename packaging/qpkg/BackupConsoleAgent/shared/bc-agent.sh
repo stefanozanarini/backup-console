@@ -2,10 +2,11 @@
 # Script di servizio del QPKG BackupConsoleAgent (busybox sh).
 #
 #   bc-agent.sh start|stop|restart|status
-#   bc-agent.sh enroll -server https://agents.<dominio> -token <TOKEN> [-allow-shell]
+#   bc-agent.sh enroll -server https://agents.<dominio> -token <TOKEN> [-disable-remote-exec]
 #   bc-agent.sh collect      stampa i dati raccolti, senza inviarli
 #
-# Un piccolo supervisore riavvia l'agente se termina e ruota il log.
+# Un piccolo supervisore riavvia l'agente se termina e ruota il log. Il codice di
+# uscita 75 significa "aggiornamento installato": riavvio immediato.
 
 CONF=/etc/config/qpkg.conf
 QPKG_NAME="BackupConsoleAgent"
@@ -46,6 +47,11 @@ supervise() {
 		wait $!
 		code=$?
 		rm -f "$AGENT_PID"
+		if [ "$code" = "75" ]; then
+			log "riavvio dopo aggiornamento"
+			sleep 1
+			continue
+		fi
 		log "agente terminato (codice $code), riavvio tra ${RESTART_DELAY}s"
 		sleep "$RESTART_DELAY"
 	done
@@ -72,12 +78,14 @@ start() {
 }
 
 stop() {
+	# Il supervisore, fermandosi, termina l'agente e rimuove il suo pid file: le
+	# letture possono trovare il file già sparito.
 	if [ -f "$SUP_PID" ]; then
-		kill "$(cat "$SUP_PID")" 2>/dev/null
+		kill "$(cat "$SUP_PID" 2>/dev/null)" 2>/dev/null
 		rm -f "$SUP_PID"
 	fi
 	if [ -f "$AGENT_PID" ]; then
-		kill "$(cat "$AGENT_PID")" 2>/dev/null
+		kill "$(cat "$AGENT_PID" 2>/dev/null)" 2>/dev/null
 		rm -f "$AGENT_PID"
 	fi
 	log "fermato"

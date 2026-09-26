@@ -13,6 +13,7 @@ dependencies = [
     "cryptography>=43",
     "pyjwt[crypto]>=2.9",
     "email-validator>=2.2",
+    "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]

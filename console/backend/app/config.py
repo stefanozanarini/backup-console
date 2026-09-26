@@ -27,6 +27,16 @@ class Settings(BaseSettings):
     # URL pubblico dell'endpoint agenti, mostrato nei comandi di installazione.
     agents_url: str = ""
 
+    # Chiave locale per cifrare i segreti (TOTP). Default: file generato accanto alla CA.
+    secret_key_file: str = ""
+    # Binari dei rilasci dell'agente.
+    releases_dir: str = "/data/releases"
+    # Chiave pubblica Ed25519 (base64) dei rilasci: se impostata, gli upload con firma
+    # non valida vengono rifiutati. La verifica vincolante resta comunque nell'agente.
+    release_public_key: str = ""
+    elevation_minutes: int = 15
+    command_poll_wait_s: int = 25
+
     enroll_token_ttl_hours: int = 24
     agent_offline_after_s: int = 300
     worker_interval_s: int = 60

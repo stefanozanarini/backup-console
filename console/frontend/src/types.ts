@@ -12,6 +12,7 @@ export interface Me {
   email: string;
   display_name: string | null;
   roles: RoleOut[];
+  totp_enabled: boolean;
 }
 
 export interface Tenant {
@@ -93,9 +94,80 @@ export interface Inventory {
   };
 }
 
+export interface VeeamRepository {
+  name: string;
+  type?: string | null;
+  total_bytes?: number | null;
+  free_bytes?: number | null;
+}
+
+export interface VeeamStatus {
+  product?: "vbr" | "vaw";
+  version?: string | null;
+  repositories?: VeeamRepository[];
+  license?: { edition?: string | null; status?: string | null; expiration?: string | null } | null;
+  errors?: string[];
+  reported_at?: string;
+}
+
 export interface DeviceDetail extends Device {
   inventory: Inventory | null;
   inventory_at: string | null;
+  veeam: VeeamStatus;
+}
+
+export type VeeamResult = "Success" | "Warning" | "Failed" | "None" | string;
+
+export interface VeeamJob {
+  id: string;
+  tenant_id: string;
+  device_id: string;
+  product: "vbr" | "vaw";
+  name: string;
+  job_type: string | null;
+  enabled: boolean;
+  last_result: VeeamResult | null;
+  last_state: string | null;
+  last_start: string | null;
+  last_end: string | null;
+  last_success: string | null;
+  transferred_bytes: number | null;
+  next_run: string | null;
+  updated_at: string;
+  device_name: string;
+  tenant_name: string;
+}
+
+export type CommandStatus = "queued" | "dispatched" | "running" | "succeeded" | "failed" | "timeout" | "expired";
+
+export interface Command {
+  id: string;
+  tenant_id: string;
+  device_id: string;
+  type: "exec" | "upgrade";
+  payload: { command?: string; shell?: string; version?: string; from?: string };
+  status: CommandStatus;
+  timeout_s: number;
+  reason: string | null;
+  created_by: string | null;
+  created_at: string;
+  dispatched_at: string | null;
+  finished_at: string | null;
+  exit_code: number | null;
+  error: string | null;
+  output_truncated: boolean;
+}
+
+export interface CommandDetail extends Command {
+  output: string;
+}
+
+export interface Release {
+  version: string;
+  notes: string | null;
+  created_at: string;
+  assets: { platform: string; sha256: string; size: number }[];
+  agents: number;
 }
 
 export type Severity = "warning" | "critical";

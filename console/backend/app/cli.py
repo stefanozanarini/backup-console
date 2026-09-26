@@ -5,6 +5,7 @@
   create-tenant NOME SLUG
   create-site SLUG NOME
   create-token SLUG NOME_SITO [--note TESTO]
+  reset-totp EMAIL             disattiva il TOTP di un utente (che dovrà riconfigurarlo)
 """
 
 import argparse
@@ -22,6 +23,7 @@ from app.db import SessionLocal
 from app.models import EnrollmentToken, Role, RoleAssignment, Site, Tenant, User
 from app.models.base import utcnow
 from app.services.audit import audit
+from app.services import secrets as secret_store
 from app.services.ca import AgentCA
 
 
@@ -95,6 +97,17 @@ async def create_token(slug: str, site_name: str, note: str | None) -> None:
         print(f"token (valido fino a {expires:%Y-%m-%d %H:%M} UTC, mostrato una sola volta):\n{plain}")
 
 
+async def reset_totp(email: str) -> None:
+    async with SessionLocal() as session:
+        user = await session.scalar(select(User).where(User.email == email.lower()))
+        if user is None:
+            sys.exit(f"utente {email} non trovato")
+        user.totp_enabled, user.totp_secret_enc, user.totp_last_counter = False, None, None
+        audit(session, "totp.reset", target=user.email, via="cli")
+        await session.commit()
+        print(f"TOTP disattivato per {user.email}")
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="python -m app.cli")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -113,6 +126,8 @@ def main() -> None:
     k.add_argument("tenant_slug")
     k.add_argument("site_name")
     k.add_argument("--note")
+    r = sub.add_parser("reset-totp")
+    r.add_argument("email")
     args = p.parse_args()
 
     match args.cmd:
@@ -120,6 +135,8 @@ def main() -> None:
             run_migrations()
             created = AgentCA(settings.ca_dir).ensure()
             print("CA agenti creata" if created else "CA agenti già presente")
+            if secret_store.ensure_key():
+                print("chiave locale dei segreti creata")
         case "create-user":
             asyncio.run(create_user(args.email, args.role, args.tenant))
         case "create-tenant":
@@ -128,6 +145,8 @@ def main() -> None:
             asyncio.run(create_site(args.tenant_slug, args.name))
         case "create-token":
             asyncio.run(create_token(args.tenant_slug, args.site_name, args.note))
+        case "reset-totp":
+            asyncio.run(reset_totp(args.email))
 
 
 if __name__ == "__main__":

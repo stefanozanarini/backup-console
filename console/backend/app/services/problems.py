@@ -15,6 +15,8 @@ DEFAULT_THRESHOLDS: dict[str, tuple[float | None, float | None]] = {
     "disk.used_pct": (85.0, 95.0),
     "hw.disk_temp_c": (50.0, 60.0),
     "hw.sys_temp_c": (55.0, 70.0),
+    "veeam.repo_used_pct": (85.0, 95.0),
+    "veeam.last_success_age_h": (36.0, 72.0),
 }
 
 # Metriche booleane: 0 = problema.
@@ -27,6 +29,7 @@ THRESHOLD_TITLES = {
     "disk.used_pct": "Volume {mount} al {value:.0f}%",
     "hw.disk_temp_c": "Temperatura disco {slot}: {value:.0f}°C",
     "hw.sys_temp_c": "Temperatura sistema: {value:.0f}°C",
+    "veeam.repo_used_pct": "Repository {repo} al {value:.0f}%",
 }
 
 

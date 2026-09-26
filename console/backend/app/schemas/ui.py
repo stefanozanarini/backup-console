@@ -2,6 +2,8 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from app.models import Role
@@ -21,6 +23,7 @@ class MeOut(ORM):
     email: str
     display_name: str | None
     roles: list[RoleOut]
+    totp_enabled: bool = False
 
 
 class RoleIn(BaseModel):
@@ -94,6 +97,7 @@ class DeviceOut(ORM):
 
 
 class DeviceDetail(DeviceOut):
+    veeam: dict[str, Any] = {}
     inventory: dict[str, Any] | None = None
     inventory_at: datetime | None = None
 
@@ -116,3 +120,110 @@ class ProblemOut(ORM):
 class ProblemRow(ProblemOut):
     tenant_name: str
     device_name: str
+
+
+# --- sicurezza --------------------------------------------------------------
+
+
+class TotpSetupOut(BaseModel):
+    secret: str
+    uri: str
+
+
+class TotpCode(BaseModel):
+    code: str = Field(min_length=6, max_length=8)
+
+
+class ElevateIn(TotpCode):
+    reason: str = Field(min_length=3, max_length=300)
+
+
+class ElevationOut(BaseModel):
+    token: str
+    expires_at: datetime
+
+
+# --- comandi ----------------------------------------------------------------
+
+
+class CommandCreate(BaseModel):
+    command: str = Field(min_length=1, max_length=20_000)
+    # default: sh su Linux/QNAP, PowerShell su Windows
+    shell: Literal["default", "sh", "bash", "powershell", "pwsh", "cmd"] = "default"
+    timeout_s: int = Field(300, ge=5, le=3600)
+
+
+class CommandOut(ORM):
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    device_id: uuid.UUID
+    type: str
+    payload: dict[str, Any]
+    status: str
+    timeout_s: int
+    reason: str | None
+    created_by: uuid.UUID | None
+    created_at: datetime
+    dispatched_at: datetime | None
+    finished_at: datetime | None
+    exit_code: int | None
+    error: str | None
+    output_truncated: bool
+
+
+class CommandDetail(CommandOut):
+    output: str
+
+
+# --- rilasci e aggiornamenti --------------------------------------------------
+
+
+class ReleaseAssetOut(ORM):
+    platform: str
+    sha256: str
+    size: int
+
+
+class ReleaseOut(BaseModel):
+    version: str
+    notes: str | None
+    created_at: datetime
+    assets: list[ReleaseAssetOut]
+    agents: int  # agenti attualmente su questa versione
+
+
+class UpgradeRequest(BaseModel):
+    version: str
+    device_ids: list[uuid.UUID] | None = None  # None = tutti i dispositivi nel perimetro
+    tenant_id: uuid.UUID | None = None
+
+
+class UpgradeResult(BaseModel):
+    queued: int
+    skipped: dict[str, int]
+
+
+# --- Veeam ------------------------------------------------------------------
+
+
+class VeeamJobOut(ORM):
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    device_id: uuid.UUID
+    product: str
+    name: str
+    job_type: str | None
+    enabled: bool
+    last_result: str | None
+    last_state: str | None
+    last_start: datetime | None
+    last_end: datetime | None
+    last_success: datetime | None
+    transferred_bytes: int | None
+    next_run: datetime | None
+    updated_at: datetime
+
+
+class VeeamJobRow(VeeamJobOut):
+    device_name: str
+    tenant_name: str

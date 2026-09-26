@@ -1,7 +1,9 @@
 // bc-agent: agente della Backup Console per QNAP, server Veeam e PC con Veeam Agent.
 //
-//	bc-agent enroll -server https://agents.example.com -token XXXX [-allow-shell]
+//	bc-agent enroll  -server https://agents.example.com -token XXXX [-disable-remote-exec]
 //	bc-agent run
+//	bc-agent install -server ... -token ... [-disable-remote-exec]   (Windows, da amministratore)
+//	bc-agent uninstall [-purge]                                        (Windows)
 //	bc-agent collect      (stampa i dati raccolti, senza inviarli)
 //	bc-agent version
 package main
@@ -9,11 +11,13 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"syscall"
 
@@ -21,7 +25,9 @@ import (
 	"backupconsole/agent/internal/client"
 	"backupconsole/agent/internal/config"
 	"backupconsole/agent/internal/identity"
+	"backupconsole/agent/internal/upgrade"
 	"backupconsole/agent/internal/version"
+	"backupconsole/agent/internal/winsvc"
 )
 
 func main() {
@@ -32,9 +38,13 @@ func main() {
 	var err error
 	switch cmd {
 	case "enroll":
-		err = enroll(args)
+		err = enrollCmd(args)
 	case "run":
 		err = run(args)
+	case "install":
+		err = install(args)
+	case "uninstall":
+		err = uninstall(args)
 	case "collect":
 		err = collect()
 	case "version":
@@ -42,31 +52,50 @@ func main() {
 	default:
 		usage()
 	}
+	if errors.Is(err, agent.ErrRestart) {
+		os.Exit(upgrade.ExitRestart)
+	}
 	if err != nil {
 		log.Fatal(err)
 	}
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "uso: bc-agent enroll|run|collect|version [opzioni]")
+	fmt.Fprintln(os.Stderr, "uso: bc-agent enroll|run|install|uninstall|collect|version [opzioni]")
 	os.Exit(2)
 }
 
-func enroll(args []string) error {
+type enrollOpts struct {
+	cfgPath, server, token, serverCA string
+	disableExec, allowUnsigned       bool
+}
+
+func enrollFlags(fs *flag.FlagSet) *enrollOpts {
+	o := &enrollOpts{}
+	fs.StringVar(&o.cfgPath, "config", config.DefaultPath(), "file di configurazione")
+	fs.StringVar(&o.server, "server", "", "URL endpoint agenti, es. https://agents.example.com")
+	fs.StringVar(&o.token, "token", "", "token di enrollment generato dalla console")
+	fs.StringVar(&o.serverCA, "server-ca", "", "CA extra per il certificato TLS del server (sviluppo)")
+	fs.BoolVar(&o.disableExec, "disable-remote-exec", false, "impedisce l'esecuzione di comandi dalla console (non modificabile da remoto)")
+	fs.BoolVar(&o.allowUnsigned, "allow-unsigned-upgrades", false, "solo sviluppo: accetta aggiornamenti non firmati")
+	return o
+}
+
+func enrollCmd(args []string) error {
 	fs := flag.NewFlagSet("enroll", flag.ExitOnError)
-	cfgPath := fs.String("config", config.DefaultPath(), "file di configurazione")
-	server := fs.String("server", "", "URL endpoint agenti, es. https://agents.example.com")
-	token := fs.String("token", "", "token di enrollment generato dalla console")
-	serverCA := fs.String("server-ca", "", "CA extra per il certificato TLS del server (sviluppo)")
-	allowShell := fs.Bool("allow-shell", false, "consente shell e comandi custom dalla console (non modificabile da remoto)")
+	o := enrollFlags(fs)
 	_ = fs.Parse(args)
-	if *server == "" || *token == "" {
+	return enroll(o)
+}
+
+func enroll(o *enrollOpts) error {
+	if o.server == "" || o.token == "" {
 		return fmt.Errorf("-server e -token sono obbligatori")
 	}
-
-	cfg := config.New(*cfgPath, *server)
-	cfg.ServerCAFile = *serverCA
-	cfg.AllowShell = *allowShell
+	cfg := config.New(o.cfgPath, o.server)
+	cfg.ServerCAFile = o.serverCA
+	cfg.DisableRemoteExec = o.disableExec
+	cfg.AllowUnsignedUpgrades = o.allowUnsigned
 
 	host, _ := os.Hostname()
 	csr, err := identity.NewCSR(cfg.DataDir, host)
@@ -80,8 +109,8 @@ func enroll(args []string) error {
 	collectors := agent.Detect()
 	var resp client.EnrollResponse
 	err = c.Post(context.Background(), "/agent/v1/enroll", client.EnrollRequest{
-		Token: *token, CSRPEM: csr, Hostname: host, Platform: runtime.GOOS, Arch: runtime.GOARCH,
-		AgentVersion: version.Version, Roles: agent.Roles(collectors), AllowShell: cfg.AllowShell,
+		Token: o.token, CSRPEM: csr, Hostname: host, Platform: runtime.GOOS, Arch: runtime.GOARCH,
+		AgentVersion: version.Version, Roles: agent.Roles(collectors), AllowShell: cfg.RemoteExecAllowed(),
 	}, &resp)
 	if err != nil {
 		return fmt.Errorf("enrollment: %w", err)
@@ -93,9 +122,10 @@ func enroll(args []string) error {
 	if err := cfg.Save(); err != nil {
 		return err
 	}
-	fmt.Printf("enrollment completato: agent %s, stato %s\n", resp.AgentID, resp.Status)
+	fmt.Printf("enrollment completato: agent %s, stato %s, esecuzione remota %s\n",
+		resp.AgentID, resp.Status, map[bool]string{true: "attiva", false: "disattivata"}[cfg.RemoteExecAllowed()])
 	if resp.Status == "pending" {
-		fmt.Println("approvare l'agente dalla console, poi avviare 'bc-agent run'")
+		fmt.Println("approvare il dispositivo dalla console")
 	}
 	return nil
 }
@@ -109,6 +139,18 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
+	if winsvc.IsService() {
+		closeLog := logToFile(filepath.Join(cfg.DataDir, "agent.log"))
+		defer closeLog()
+		// Uscita con errore → il Service Control Manager riavvia il servizio.
+		return winsvc.Run(func(ctx context.Context) error { return runAgent(ctx, cfg) }, upgrade.ExitRestart)
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return runAgent(ctx, cfg)
+}
+
+func runAgent(ctx context.Context, cfg *config.Config) error {
 	cert, err := identity.Load(cfg.DataDir)
 	if err != nil {
 		return err
@@ -117,10 +159,21 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
-	// TODO: su Windows girare come servizio (golang.org/x/sys/windows/svc).
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	return agent.New(cfg, c).Run(ctx)
+}
+
+// logToFile: sotto il servizio Windows non c'è una console; log in ProgramData con
+// una rotazione minima all'avvio.
+func logToFile(path string) func() {
+	if st, err := os.Stat(path); err == nil && st.Size() > 5<<20 {
+		_ = os.Rename(path, path+".1")
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return func() {}
+	}
+	log.SetOutput(f)
+	return func() { _ = f.Close() }
 }
 
 func collect() error {
@@ -128,8 +181,23 @@ func collect() error {
 	cs := agent.Detect()
 	out := map[string]any{
 		"roles":     agent.Roles(cs),
+		"platform":  upgrade.Platform(),
 		"inventory": agent.CollectInventory(ctx, cs),
 		"metrics":   agent.CollectMetrics(ctx, cs),
+	}
+	reports := map[string]any{}
+	for _, c := range cs {
+		if r, ok := c.(agent.Reporter); ok {
+			_, p, err := r.Report(ctx)
+			if err != nil {
+				reports[c.Name()] = map[string]string{"error": err.Error()}
+			} else {
+				reports[c.Name()] = p
+			}
+		}
+	}
+	if len(reports) > 0 {
+		out["reports"] = reports
 	}
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")

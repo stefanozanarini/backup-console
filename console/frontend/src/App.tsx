@@ -3,12 +3,15 @@ import { BrowserRouter, NavLink, Navigate, Route, Routes } from "react-router-do
 import { api, ApiError, useApi } from "./api";
 import { initAuth, logout, type Session } from "./auth";
 import { Ctx, makeCanWrite, type ConsoleCtx } from "./context";
+import { ElevationBadge, ElevationProvider } from "./elevation";
 import Approvals from "./pages/Approvals";
+import Backup from "./pages/Backup";
 import DeviceDetailPage from "./pages/DeviceDetail";
 import Devices from "./pages/Devices";
 import Login from "./pages/Login";
 import Problems from "./pages/Problems";
 import Tenants from "./pages/Tenants";
+import Upgrades from "./pages/Upgrades";
 import type { Device, Me, Tenant, TenantSummary } from "./types";
 
 export default function App() {
@@ -39,6 +42,7 @@ export default function App() {
   }, []);
 
   const reloadTenants = useCallback(async () => setTenants(await api<Tenant[]>("/tenants")), []);
+  const reloadMe = useCallback(async () => setMe(await api<Me>("/me")), []);
 
   const ctx = useMemo<ConsoleCtx | null>(() => {
     if (!session || !me) return null;
@@ -49,10 +53,11 @@ export default function App() {
       tenants,
       tenantName: (id) => names.get(id) ?? "—",
       reloadTenants,
+      reloadMe,
       isSuperadmin: me.roles.some((r) => r.role === "superadmin" && r.tenant_id === null),
       canWrite: makeCanWrite(me),
     };
-  }, [session, me, tenants, reloadTenants]);
+  }, [session, me, tenants, reloadTenants, reloadMe]);
 
   if (fatal) return <div className="login"><div className="card"><div className="alert">{fatal}</div></div></div>;
   if (!session) return null;
@@ -61,6 +66,7 @@ export default function App() {
 
   return (
     <Ctx.Provider value={ctx}>
+      <ElevationProvider>
       <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <div className="app">
           <Sidebar />
@@ -70,13 +76,16 @@ export default function App() {
               <Route path="/problemi" element={<Problems />} />
               <Route path="/dispositivi" element={<Devices />} />
               <Route path="/dispositivi/:id" element={<DeviceDetailPage />} />
+              <Route path="/backup" element={<Backup />} />
               <Route path="/approvazioni" element={<Approvals />} />
+              <Route path="/aggiornamenti" element={<Upgrades />} />
               <Route path="/tenant" element={<Tenants />} />
               <Route path="*" element={<Navigate to="/problemi" replace />} />
             </Routes>
           </main>
         </div>
       </BrowserRouter>
+      </ElevationProvider>
     </Ctx.Provider>
   );
 }
@@ -100,11 +109,13 @@ function Sidebar() {
         )}
       </NavLink>
       <NavLink to="/dispositivi" className="nav-link">Dispositivi</NavLink>
+      <NavLink to="/backup" className="nav-link">Backup Veeam</NavLink>
       <NavLink to="/approvazioni" className="nav-link">
         Approvazioni
         {pending && pending.length > 0 && <span className="nav-count">{pending.length}</span>}
       </NavLink>
       <NavLink to="/tenant" className="nav-link">Tenant e siti</NavLink>
+      <NavLink to="/aggiornamenti" className="nav-link">Aggiornamenti agente</NavLink>
       <SidebarFoot />
     </nav>
   );
@@ -115,6 +126,7 @@ function SidebarFoot() {
     <Ctx.Consumer>
       {(c) => (
         <div className="sidebar-foot">
+          <ElevationBadge />
           <span className="email" title={c?.me.email}>{c?.me.email}</span>
           <button className="btn small" onClick={() => void logout()}>Esci</button>
         </div>

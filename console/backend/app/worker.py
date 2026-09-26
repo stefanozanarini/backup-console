@@ -4,12 +4,12 @@ import asyncio
 import logging
 from datetime import timedelta
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import selectinload
 
 from app.config import settings
 from app.db import SessionLocal
-from app.models import Agent, AgentStatus, DeviceKind, Severity
+from app.models import Agent, AgentStatus, Command, CommandStatus, DeviceKind, Severity
 from app.models.base import utcnow
 from app.services.problems import raise_problem, resolve_problem
 
@@ -43,6 +43,34 @@ async def check_offline_agents() -> int:
     return raised
 
 
+QUEUE_TTL = timedelta(hours=1)
+RESULT_GRACE = timedelta(minutes=2)
+
+
+async def expire_commands() -> int:
+    """Comandi mai ritirati (agente spento) → expired; avviati ma senza esito → timeout."""
+    now = utcnow()
+    async with SessionLocal() as session:
+        r1 = await session.execute(
+            update(Command)
+            .where(Command.status == CommandStatus.QUEUED, Command.created_at < now - QUEUE_TTL)
+            .values(status=CommandStatus.EXPIRED, finished_at=now, error="non ritirato dall'agente entro 1 ora")
+        )
+        running = (
+            await session.scalars(
+                select(Command).where(Command.status.in_([CommandStatus.DISPATCHED, CommandStatus.RUNNING]))
+            )
+        ).all()
+        n = r1.rowcount or 0
+        for c in running:
+            if c.dispatched_at and c.dispatched_at + timedelta(seconds=c.timeout_s) + RESULT_GRACE < now:
+                c.status, c.finished_at = CommandStatus.TIMEOUT, now
+                c.error = c.error or "nessun esito dall'agente entro il timeout"
+                n += 1
+        await session.commit()
+    return n
+
+
 async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     log.info("worker avviato, intervallo %ss", settings.worker_interval_s)
@@ -51,6 +79,8 @@ async def main() -> None:
             n = await check_offline_agents()
             if n:
                 log.info("agenti offline: %d", n)
+            if m := await expire_commands():
+                log.info("comandi scaduti: %d", m)
         except Exception:
             log.exception("errore nel ciclo del worker")
         await asyncio.sleep(settings.worker_interval_s)

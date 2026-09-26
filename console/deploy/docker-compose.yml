@@ -19,6 +19,7 @@ x-backend: &backend
     BC_AGENTS_URL: https://${AGENTS_HOST}${AGENTS_URL_PORT:-}
   volumes:
     - agent_ca:/data/ca
+    - releases:/data/releases
   networks: [internal]
 
 services:
@@ -83,6 +84,7 @@ services:
 
 volumes:
   pgdata:
+  releases:
   agent_ca:
   caddy_data:
   caddy_config:

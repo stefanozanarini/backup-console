@@ -20,6 +20,8 @@ import (
 type Client struct {
 	base string
 	hc   *http.Client
+	// Client separato per il long-poll dei comandi e i download: timeout più lunghi.
+	long *http.Client
 	seq  atomic.Int64
 }
 
@@ -48,6 +50,7 @@ func New(serverURL string, cert *tls.Certificate, serverCAFile string) (*Client,
 	c := &Client{
 		base: strings.TrimRight(serverURL, "/"),
 		hc:   &http.Client{Transport: transport, Timeout: 60 * time.Second},
+		long: &http.Client{Transport: transport, Timeout: 10 * time.Minute},
 	}
 	c.seq.Store(time.Now().UnixMilli())
 	return c, nil
@@ -83,6 +86,49 @@ func (c *Client) Post(ctx context.Context, path string, body, out any) error {
 		return json.Unmarshal(data, out)
 	}
 	return nil
+}
+
+// GetJSON esegue una GET; ritorna false (senza errore) se la console risponde 204.
+func (c *Client) GetJSON(ctx context.Context, path string, out any) (bool, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path, nil)
+	if err != nil {
+		return false, err
+	}
+	resp, err := c.long.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNoContent {
+		return false, nil
+	}
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode >= 300 {
+		return false, &HTTPError{Status: resp.StatusCode, Body: strings.TrimSpace(string(data))}
+	}
+	return true, json.Unmarshal(data, out)
+}
+
+// Download scrive il corpo della risposta in w, fino a maxBytes.
+func (c *Client) Download(ctx context.Context, path string, w io.Writer, maxBytes int64) (int64, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path, nil)
+	if err != nil {
+		return 0, err
+	}
+	resp, err := c.long.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return 0, &HTTPError{Status: resp.StatusCode, Body: strings.TrimSpace(string(body))}
+	}
+	n, err := io.Copy(w, io.LimitReader(resp.Body, maxBytes+1))
+	if err == nil && n > maxBytes {
+		err = fmt.Errorf("download oltre il limite di %d byte", maxBytes)
+	}
+	return n, err
 }
 
 type Envelope struct {
@@ -150,4 +196,24 @@ type HeartbeatResponse struct {
 	ServerTime     time.Time `json:"server_time"`
 	ConfigVersion  int       `json:"config_version"`
 	DesiredVersion *string   `json:"desired_version"`
+}
+
+type Command struct {
+	ID       string         `json:"id"`
+	Type     string         `json:"type"`
+	TimeoutS int            `json:"timeout_s"`
+	Payload  map[string]any `json:"payload"`
+}
+
+type CommandResult struct {
+	Status   string  `json:"status"` // succeeded / failed
+	ExitCode *int    `json:"exit_code"`
+	Error    *string `json:"error,omitempty"`
+}
+
+type Event struct {
+	TS       time.Time      `json:"ts"`
+	Type     string         `json:"type"`
+	Severity string         `json:"severity"`
+	Data     map[string]any `json:"data"`
 }

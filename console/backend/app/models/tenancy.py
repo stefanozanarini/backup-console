@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import ForeignKey, String, UniqueConstraint
+from sqlalchemy import BigInteger, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, UUIDPk, utcnow
@@ -45,6 +45,12 @@ class User(UUIDPk, Base):
     oidc_subject: Mapped[str | None] = mapped_column(String(200), unique=True)
     is_active: Mapped[bool] = mapped_column(default=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    # Secondo fattore per la sessione elevata (comandi remoti). Segreto cifrato con la
+    # chiave locale della console (services/secrets.py).
+    totp_secret_enc: Mapped[str | None] = mapped_column(String(500))
+    totp_enabled: Mapped[bool] = mapped_column(default=False)
+    # Ultimo intervallo TOTP accettato: impedisce di riusare lo stesso codice.
+    totp_last_counter: Mapped[int | None] = mapped_column(BigInteger)
 
     roles: Mapped[list["RoleAssignment"]] = relationship(back_populates="user", lazy="selectin")
 
@@ -59,3 +65,16 @@ class RoleAssignment(UUIDPk, Base):
     tenant_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"))
 
     user: Mapped[User] = relationship(back_populates="roles")
+
+
+class Elevation(UUIDPk, Base):
+    """Sessione elevata: ottenuta con TOTP + motivo, necessaria per i comandi remoti."""
+
+    __tablename__ = "elevations"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    reason: Mapped[str] = mapped_column(String(300))
+    ip: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    expires_at: Mapped[datetime]

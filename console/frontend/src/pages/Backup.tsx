@@ -1,0 +1,96 @@
+import { useMemo } from "react";
+import { Link, useSearchParams } from "react-router-dom";
+import { useApi } from "../api";
+import { Empty, ErrorBox } from "../components";
+import { useConsole } from "../context";
+import { ago, bytes, dateTime } from "../format";
+import type { VeeamJob } from "../types";
+import { VeeamResultBadge } from "../veeam";
+
+type Bucket = "success" | "warning" | "failed" | "none";
+
+function bucket(j: VeeamJob): Bucket {
+  const r = (j.last_result ?? "").toLowerCase();
+  return r === "success" || r === "warning" || r === "failed" ? r : "none";
+}
+
+export default function Backup() {
+  const { tenants } = useConsole();
+  const [params, setParams] = useSearchParams();
+  const tenant = params.get("tenant") ?? "";
+  const result = (params.get("result") ?? "") as Bucket | "";
+  const { data, error } = useApi<VeeamJob[]>(`/veeam/jobs${tenant ? `?tenant_id=${tenant}` : ""}`, 60000);
+
+  const counts = useMemo(() => {
+    const c: Record<Bucket, number> = { success: 0, warning: 0, failed: 0, none: 0 };
+    for (const j of data ?? []) if (j.enabled) c[bucket(j)]++;
+    return c;
+  }, [data]);
+  // Prima quello che richiede attenzione.
+  const order: Record<Bucket, number> = { failed: 0, warning: 1, none: 2, success: 3 };
+  const rows = (data ?? [])
+    .filter((j) => !result || (j.enabled && bucket(j) === result))
+    .sort((a, b) => Number(!a.enabled) - Number(!b.enabled) || order[bucket(a)] - order[bucket(b)]);
+
+  function setFilter(key: string, value: string) {
+    const next = new URLSearchParams(params);
+    if (value) next.set(key, value);
+    else next.delete(key);
+    setParams(next, { replace: true });
+  }
+
+  const tiles: { key: Bucket; label: string; dot: string }[] = [
+    { key: "failed", label: "falliti", dot: "offline" },
+    { key: "warning", label: "con avvisi", dot: "pending" },
+    { key: "success", label: "riusciti", dot: "online" },
+    { key: "none", label: "mai eseguiti", dot: "" },
+  ];
+
+  return (
+    <>
+      <div className="page-head">
+        <div>
+          <h1>Backup Veeam</h1>
+          <div className="sub">Ultimo esito di ogni job su server B&R e PC con Veeam Agent</div>
+        </div>
+      </div>
+      <div className="tiles">
+        {tiles.map((t) => (
+          <button key={t.key} className={`tile ${result === t.key ? "selected" : ""}`}
+            onClick={() => setFilter("result", result === t.key ? "" : t.key)}>
+            <div className="num">{counts[t.key]}</div>
+            <div className="num-label"><span className={`dot ${t.dot}`} aria-hidden="true" />job {t.label}</div>
+          </button>
+        ))}
+      </div>
+      <div className="filters">
+        <select value={tenant} onChange={(e) => setFilter("tenant", e.target.value)} aria-label="Tenant">
+          <option value="">Tutti i tenant</option>
+          {tenants.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </select>
+      </div>
+      <ErrorBox error={error} />
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Esito</th><th>Job</th><th>Dispositivo</th><th>Tenant</th><th>Ultima esecuzione</th><th>Ultimo successo</th><th className="num">Trasferiti</th></tr>
+          </thead>
+          <tbody>
+            {rows.map((j) => (
+              <tr key={j.id}>
+                <td><VeeamResultBadge result={j.last_result} enabled={j.enabled} /></td>
+                <td>{j.name} <span className="chip">{j.product === "vbr" ? "B&R" : "Agent"}</span></td>
+                <td className="nowrap"><Link to={`/dispositivi/${j.device_id}`}>{j.device_name}</Link></td>
+                <td className="nowrap">{j.tenant_name}</td>
+                <td className="nowrap" title={dateTime(j.last_end ?? j.last_start)}>{ago(j.last_end ?? j.last_start)}</td>
+                <td className="nowrap muted" title={dateTime(j.last_success)}>{ago(j.last_success)}</td>
+                <td className="num">{j.transferred_bytes != null ? bytes(j.transferred_bytes) : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {data && rows.length === 0 && <Empty>Nessun job</Empty>}
+      </div>
+    </>
+  );
+}

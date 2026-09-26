@@ -13,7 +13,7 @@ COPY alembic.ini ./
 COPY alembic ./alembic
 
 # Il volume della CA eredita questi permessi alla prima creazione.
-RUN mkdir -p /data/ca && chown -R bc:bc /data
+RUN mkdir -p /data/ca /data/releases && chown -R bc:bc /data
 USER bc
 
 EXPOSE 8000

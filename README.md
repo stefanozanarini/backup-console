@@ -95,6 +95,37 @@ bc-agent run -config ./agent.json
 
 Pacchetti QNAP: vedi [packaging/README.md](packaging/README.md).
 
+Windows (server Veeam e PC), da un prompt amministratore:
+
+```bash
+bc-agent.exe install -server https://agents.<dominio> -token <TOKEN>
+```
+
+Copia l'eseguibile in `C:\Program Files\BackupConsoleAgent`, registra l'agente (configurazione,
+chiave e log in `C:\ProgramData\BackupConsoleAgent`, accessibile solo a SYSTEM e Administrators)
+e crea il servizio **Backup Console Agent**, con avvio automatico e riavvio in caso di uscita.
+L'esecuzione remota è attiva: per disattivarla aggiungere `-disable-remote-exec`. Per rimuovere
+l'agente: `bc-agent.exe uninstall [-purge]`.
+
+## Rilasci firmati
+
+Una volta sola, su una postazione sicura:
+
+```bash
+go run ./agent/cmd/bc-release keygen -out release-signing.key
+```
+
+Il comando stampa la chiave pubblica. Da impostare in tre posti:
+- **GitHub → Settings → Variables**: `AGENT_RELEASE_PUBLIC_KEY` = chiave pubblica (incorporata nei binari);
+- **GitHub → Environment `agent-release` → Secrets**: `AGENT_RELEASE_SIGNING_KEY` = contenuto di `release-signing.key`;
+- **console** (facoltativo, controllo anticipato): `BC_RELEASE_PUBLIC_KEY` nel `.env`.
+
+Un rilascio parte con un tag `agent-v0.2.0`: la CI compila, firma e pubblica una GitHub Release.
+Binari e `manifest.json` si caricano poi in console da **Aggiornamenti agente**.
+
+I binari compilati senza chiave pubblica (build locali) rifiutano gli aggiornamenti remoti. In
+sviluppo si può usare `enroll -allow-unsigned-upgrades`.
+
 Con `bc-agent collect` si stampano i dati raccolti senza inviarli: utile per validare
 i parser su un QNAP reale.
 

@@ -233,3 +233,33 @@ select:focus, input:focus { outline: 2px solid var(--accent); outline-offset: -1
 .chart-tooltip .row .v { font-variant-numeric: tabular-nums; font-weight: 500; }
 .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-2); margin-bottom: 8px; }
 .legend .sw { display: inline-block; width: 12px; height: 3px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+
+/* --- modale e sessione elevata ------------------------------------------ */
+.modal-backdrop { position: fixed; inset: 0; background: rgb(0 0 0 / 0.45); display: grid; place-items: center; padding: 16px; z-index: 10; }
+.modal { width: min(460px, 100%); max-height: calc(100vh - 32px); overflow: auto; }
+.modal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.modal-head h2 { margin: 0; }
+.stack { display: grid; gap: 12px; }
+.field { display: grid; gap: 4px; font-size: 13px; color: var(--text-2); }
+.field input, .field select, .field textarea { color: var(--text); }
+.otp { font-size: 20px; letter-spacing: 6px; text-align: center; max-width: 180px; }
+.qr-row { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+.qr-row img { border-radius: 6px; background: #fff; padding: 4px; }
+.secret { display: inline-block; margin-top: 4px; font-size: 14px; word-break: break-all; }
+.elevation-badge { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 6px 8px; border: 1px solid var(--warning); border-radius: 6px; color: var(--text); font-size: 12.5px; }
+
+/* --- console comandi ----------------------------------------------------- */
+textarea {
+  font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border);
+  border-radius: 6px; padding: 8px 10px; width: 100%; resize: vertical;
+}
+textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.terminal {
+  background: #111110; color: #e8e7e1; border-radius: 6px; padding: 10px 12px; margin: 0;
+  max-height: 420px; overflow: auto; white-space: pre-wrap; word-break: break-word; font-size: 12.5px; line-height: 1.5;
+}
+.terminal .meta { color: #9a9990; }
+.cmd-status { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13px; color: var(--text-2); margin: 8px 0; }
+.cmd-history button.linklike { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; text-align: left; }
+.cmd-history button.linklike:hover { text-decoration: underline; }
+.cmd-history .cmdline { max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: bottom; }

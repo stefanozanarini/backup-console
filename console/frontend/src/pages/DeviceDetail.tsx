@@ -4,8 +4,10 @@ import { api, useApi } from "../api";
 import { ConnectivityBadge, Empty, ErrorBox, SeverityBadge, StateBadge, UsageBar } from "../components";
 import { useConsole } from "../context";
 import { AGENT_STATUS_LABEL, ago, bytes, connectivity, dateTime, KIND_LABEL } from "../format";
+import CommandPanel from "../CommandPanel";
 import LineChart, { type Series } from "../LineChart";
-import type { DeviceDetail, MetricSeries, Problem } from "../types";
+import type { DeviceDetail, MetricSeries, Problem, Release } from "../types";
+import { VeeamSection } from "../veeam";
 
 const RANGES = [
   { hours: 24, label: "24 ore" },
@@ -15,7 +17,7 @@ const RANGES = [
 
 export default function DeviceDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { tenantName, canWrite } = useConsole();
+  const { tenantName, canWrite, isSuperadmin } = useConsole();
   const [hours, setHours] = useState(24 * 7);
   const [actionError, setActionError] = useState<Error | null>(null);
 
@@ -98,6 +100,9 @@ export default function DeviceDetailPage() {
                   <button className="btn danger" onClick={() => void setStatus("revoke")}>Revoca</button>
                 </div>
               )}
+              {isSuperadmin && d.agent.status === "approved" && (
+                <UpgradeControl deviceId={d.id} current={d.agent.version} onError={setActionError} />
+              )}
             </>
           ) : (
             <Empty>Nessun agente</Empty>
@@ -126,6 +131,8 @@ export default function DeviceDetailPage() {
           </div>
         )}
       </section>
+
+      <VeeamSection device={d} />
 
       <section className="card">
         <div className="page-head" style={{ marginBottom: 8 }}>
@@ -218,6 +225,42 @@ export default function DeviceDetailPage() {
           </section>
         </div>
       )}
+
+      <div style={{ marginTop: 16 }}>
+        <CommandPanel device={d} writable={writable} />
+      </div>
     </>
+  );
+}
+
+function UpgradeControl(props: { deviceId: string; current: string | null; onError: (e: Error | null) => void }) {
+  const releases = useApi<Release[]>("/releases");
+  const [version, setVersion] = useState("");
+  const [queued, setQueued] = useState<string | null>(null);
+  const options = (releases.data ?? []).filter((r) => r.version !== props.current);
+  if (options.length === 0) return null;
+
+  async function upgrade() {
+    const v = version || options[0].version;
+    props.onError(null);
+    try {
+      const r = await api<{ queued: number; skipped: Record<string, number> }>("/upgrades", {
+        method: "POST",
+        body: { version: v, device_ids: [props.deviceId] },
+      });
+      setQueued(r.queued ? `Aggiornamento a ${v} in coda` : `Non accodato: ${Object.keys(r.skipped).join(", ")}`);
+    } catch (e) {
+      props.onError(e as Error);
+    }
+  }
+
+  return (
+    <div className="form-row" style={{ marginTop: 12 }}>
+      <select value={version} onChange={(e) => setVersion(e.target.value)} aria-label="Versione">
+        {options.map((r) => <option key={r.version} value={r.version}>{r.version}</option>)}
+      </select>
+      <button className="btn" onClick={() => void upgrade()}>Aggiorna agente</button>
+      {queued && <span className="muted">{queued}</span>}
+    </div>
   );
 }

@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
+          go-version: "1.24"
       - run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
       - run: go vet ./...
       - run: go test ./...
@@ -40,19 +40,22 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
+          go-version: "1.24"
       - name: Build
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           GOARM: ${{ matrix.goarm }}
           CGO_ENABLED: "0"
+          # Chiave pubblica di verifica degli aggiornamenti (variabile di repository,
+          # non segreta): senza, l'agente rifiuta gli aggiornamenti remoti.
+          RELEASE_PUBLIC_KEY: ${{ vars.AGENT_RELEASE_PUBLIC_KEY }}
         run: |
           VERSION="${GITHUB_REF_NAME#agent-v}"
           [ "${GITHUB_REF_TYPE}" = tag ] || VERSION="0.0.0-${GITHUB_SHA::8}"
           EXT=""; [ "$GOOS" = windows ] && EXT=".exe"
           mkdir -p dist
-          go build -trimpath -ldflags "-s -w -X backupconsole/agent/internal/version.Version=${VERSION}" \
+          go build -trimpath -ldflags "-s -w -X backupconsole/agent/internal/version.Version=${VERSION} -X backupconsole/agent/internal/upgrade.PublicKey=${RELEASE_PUBLIC_KEY}" \
             -o "dist/bc-agent-${{ matrix.name }}${EXT}" ./cmd/bc-agent
       - uses: actions/upload-artifact@v4
         with:
@@ -78,5 +81,35 @@ jobs:
         with:
           name: qpkg
           path: dist/qpkg/*
-      # TODO fase 4: MSI (WiX, runner windows), firma Authenticode (Azure Trusted
-      # Signing), manifest firmato Ed25519 in un Environment protetto, GitHub Release.
+
+  # Solo sui tag agent-vX.Y.Z: firma Ed25519 dei binari e GitHub Release con
+  # binari + manifest.json da caricare in console (Aggiornamenti agente).
+  release:
+    if: github.ref_type == 'tag'
+    needs: [build, qpkg]
+    runs-on: ubuntu-latest
+    environment: agent-release  # Environment protetto: approvazione manuale prima della firma
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Firma dei binari
+        env:
+          BC_RELEASE_KEY: ${{ secrets.AGENT_RELEASE_SIGNING_KEY }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#agent-v}"
+          mkdir -p release
+          cp artifacts/bc-agent-*/bc-agent-* release/
+          cd agent && go run ./cmd/bc-release sign -version "$VERSION" ../release
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/*
+            artifacts/qpkg/*
+      # TODO: firma Authenticode dell'exe Windows (Azure Trusted Signing) e MSI.

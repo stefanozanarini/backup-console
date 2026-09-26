@@ -18,7 +18,8 @@ class EnrollRequest(BaseModel):
     arch: str = Field(max_length=32)
     agent_version: str = Field(max_length=64)
     roles: list[AgentRole] = []
-    allow_shell: bool = False
+    # Esecuzione remota: abilitata di default, disattivabile solo in installazione.
+    allow_shell: bool = True
 
 
 class EnrollResponse(BaseModel):
@@ -86,3 +87,64 @@ class EventsPayload(BaseModel):
 class IngestResponse(BaseModel):
     accepted: bool
     duplicate: bool = False
+
+
+# --- Veeam -----------------------------------------------------------------
+
+
+class VeeamJobIn(BaseModel):
+    id: str = Field(max_length=200)
+    name: str = Field(max_length=300)
+    type: str | None = Field(default=None, max_length=100)
+    enabled: bool = True
+    last_result: str | None = Field(default=None, max_length=32)  # Success / Warning / Failed / None
+    last_state: str | None = Field(default=None, max_length=32)
+    last_start: datetime | None = None
+    last_end: datetime | None = None
+    last_success: datetime | None = None
+    transferred_bytes: int | None = None
+    next_run: datetime | None = None
+    details: dict[str, Any] = {}
+
+
+class VeeamRepositoryIn(BaseModel):
+    name: str = Field(max_length=300)
+    type: str | None = Field(default=None, max_length=100)
+    total_bytes: int | None = None
+    free_bytes: int | None = None
+
+
+class VeeamLicenseIn(BaseModel):
+    edition: str | None = None
+    status: str | None = None
+    expiration: datetime | None = None
+    support_expiration: datetime | None = None
+
+
+class VeeamPayload(BaseModel):
+    product: Literal["vbr", "vaw"]
+    version: str | None = Field(default=None, max_length=64)
+    jobs: list[VeeamJobIn] = Field(default=[], max_length=2000)
+    repositories: list[VeeamRepositoryIn] = Field(default=[], max_length=500)
+    license: VeeamLicenseIn | None = None
+    errors: list[str] = Field(default=[], max_length=50)  # errori non fatali del collector
+
+
+# --- comandi e aggiornamenti ------------------------------------------------
+
+
+class AgentCommand(BaseModel):
+    id: uuid.UUID
+    type: str
+    timeout_s: int
+    payload: dict[str, Any]
+
+
+class CommandOutputIn(BaseModel):
+    data: str = Field(max_length=200_000)
+
+
+class CommandResultIn(BaseModel):
+    status: Literal["succeeded", "failed"]
+    exit_code: int | None = None
+    error: str | None = Field(default=None, max_length=1000)

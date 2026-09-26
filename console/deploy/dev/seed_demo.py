@@ -55,6 +55,34 @@ def make_csr() -> tuple[str, bytes]:
     return csr.public_bytes(serialization.Encoding.PEM).decode(), key_pem
 
 
+def veeam_payload(host: str, role: str, now: datetime) -> dict:
+    def at(hours_ago: float) -> str:
+        return (now - timedelta(hours=hours_ago)).isoformat()
+
+    if role == "veeam_agent":
+        return {"product": "vaw", "version": "6.3.0.177", "jobs": [
+            {"id": "vaw:Backup Job PC", "name": "Backup Job PC", "type": "AgentBackup", "enabled": True,
+             "last_result": "Success", "last_end": at(20), "last_success": at(20)}]}
+    jobs = [
+        ("Backup VM produzione", "Backup", "Success", 6, 6, 184 * 1024**3),
+        ("Backup SQL", "Backup", "Warning", 5, 29, 42 * 1024**3),
+        ("Copia su NAS", "BackupCopy", "Success", 3, 3, 96 * 1024**3),
+        ("Replica DR", "Replica", "Failed", 2, 80, None),
+        ("Test archivio", "Backup", "None", None, None, None),
+    ]
+    return {
+        "product": "vbr", "version": "12.3.1.1139",
+        "jobs": [{"id": f"{host}-{i}", "name": n, "type": t, "enabled": n != "Test archivio", "last_result": r,
+                  "last_state": "Stopped", "last_start": at(end + 0.7) if end else None, "last_end": at(end) if end else None,
+                  "last_success": at(ok) if ok else None, "transferred_bytes": size}
+                 for i, (n, t, r, end, ok, size) in enumerate(jobs)],
+        "repositories": [{"name": "Repo QNAP", "type": "LinuxLocal", "total_bytes": 24 * 1024**4, "free_bytes": int(2.1 * 1024**4)},
+                         {"name": "Default Backup Repository", "type": "WinLocal", "total_bytes": 2 * 1024**4, "free_bytes": int(1.4 * 1024**4)}],
+        "license": {"edition": "EnterprisePlus", "status": "Valid", "expiration": (now + timedelta(days=21)).isoformat()},
+        "errors": [],
+    }
+
+
 def env(payload) -> dict:
     return {"msg_id": str(uuid.uuid4()), "seq": 1, "ts": datetime.now(UTC).isoformat(), "payload": payload}
 
@@ -142,6 +170,8 @@ def main() -> None:
                     metrics.append({"ts": ts, "name": "raid.healthy", "labels": {"array": a["name"]}, "value": 1 if a["healthy"] else 0})
             if metrics:
                 agent.post("/metrics", json=env({"metrics": metrics})).raise_for_status()
+        if roles[0] in ("veeam_vbr", "veeam_agent"):
+            agent.post("/veeam", json=env(veeam_payload(host, roles[0], now))).raise_for_status()
         print(f"{host}: ok")
 
     print(f"certificati demo in {tmp}")

@@ -8,6 +8,7 @@ export interface ConsoleCtx {
   tenants: Tenant[];
   tenantName: (id: string) => string;
   reloadTenants: () => Promise<void>;
+  reloadMe: () => Promise<void>;
   isSuperadmin: boolean;
   canWrite: (tenantId: string) => boolean;
 }

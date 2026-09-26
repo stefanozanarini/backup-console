@@ -36,6 +36,8 @@ class Device(UUIDPk, Base):
     model: Mapped[str | None] = mapped_column(String(200))
     serial: Mapped[str | None] = mapped_column(String(200))
     os_version: Mapped[str | None] = mapped_column(String(200))
+    # Ultimo report Veeam: prodotto, versione, repository, licenza (i job sono in veeam_jobs).
+    veeam: Mapped[dict[str, Any]] = mapped_column(default=dict)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     last_seen_at: Mapped[datetime | None]
 

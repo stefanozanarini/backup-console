@@ -80,36 +80,51 @@ Altre misure:
 - **Da fare**: Row-Level Security di PostgreSQL come seconda protezione.
 - Tutte le azioni vanno nella tabella `audit_log` (append-only).
 
-### Esecuzione remota *(fase 3)*
+### Esecuzione remota
 
-| Livello | Cosa | Protezione |
-|---|---|---|
-| Task del catalogo | script/rsync salvati, schedulati **sull'agente** | ruolo `operator` |
-| Comando custom | comando singolo con output | sessione elevata |
-| Shell interattiva | xterm.js ↔ PTY via WebSocket | sessione elevata + registrazione |
+- **Attiva di default** su ogni agente. Si disattiva solo in installazione
+  (`-disable-remote-exec`, sia QPKG sia Windows): la console lo mostra ma non può modificarlo.
+- **Sessione elevata** obbligatoria per lanciare un comando:
+  - secondo fattore **TOTP personale** (app di autenticazione), separato dal login e configurato
+    al primo utilizzo. Il seed è cifrato nel DB con una chiave locale (`secret.key` nel volume
+    della CA). Ogni codice vale una sola volta;
+  - **motivo** obbligatorio, sessione di **15 minuti** (token solo nella scheda del browser);
+  - reset del TOTP di un utente: `python -m app.cli reset-totp <email>`.
+- **Consegna**: l'agente fa long-poll su `GET /agent/v1/commands/next` (attesa fino a 25 s),
+  quindi il comando parte entro circa un secondo. Il server rilascia la connessione al DB durante
+  l'attesa.
+- **Esecuzione**:
+  - shell: `sh` su Linux/QNAP, PowerShell su Windows (`bash`, `pwsh`, `cmd` a scelta);
+  - stdout e stderr inviati a blocchi ogni secondo, fino a 1 MB;
+  - al timeout viene terminato l'intero albero di processi;
+  - massimo 2 comandi in parallelo per agente.
+- **Tracciabilità**: audit in console (utente, motivo, comando, IP) e riga nel log locale del
+  dispositivo. Comandi mai ritirati → `expired` dopo 1 ora; senza esito → `timeout`.
+- **Fase 2 (hardening)**: firma dei comandi nel browser con la chiave personale dell'operatore,
+  così nemmeno un server della console compromesso potrebbe inviare comandi.
 
-**Sessione elevata**:
-- secondo fattore personale (TOTP o passkey), separato dal login;
-- motivo obbligatorio;
-- durata di 15–30 minuti, valida su un solo tenant;
-- notifica all'amministratore;
-- registrazione integrale della sessione.
+### Aggiornamenti dell'agente
 
-**Consenso locale**: shell e comandi custom funzionano solo se abilitati **in
-installazione** (`bc-agent enroll -allow-shell`, `msiexec ... ALLOW_SHELL=1`). La console
-non può modificare questo flag.
-
-**Fase 2 (hardening)**: ogni comando firmato nel browser con la chiave personale
-dell'operatore. Così nemmeno chi compromettesse il server della console potrebbe
-inviare comandi.
-
-### Aggiornamenti dell'agente *(fase 4)*
-
-1. La CI firma i binari (Ed25519, chiave in un GitHub Environment protetto).
-2. L'agente verifica la firma con la chiave pubblica incorporata nel binario.
-3. Rollout a gruppi: canary → pilota → tutti.
-4. Rollback automatico se il nuovo binario non si registra entro N minuti.
-5. Su Windows l'aggiornamento avviene tramite *MajorUpgrade* dell'MSI.
+1. **Build**: la CI compila i binari con la chiave pubblica di verifica incorporata
+   (`-X .../upgrade.PublicKey=`, variabile di repository `AGENT_RELEASE_PUBLIC_KEY`).
+2. **Firma**: su un tag `agent-vX.Y.Z` la CI firma i binari con `bc-release sign`. La chiave
+   privata è nel secret `AGENT_RELEASE_SIGNING_KEY`, nell'Environment protetto `agent-release`,
+   e **non è mai sulla console**. Il risultato è una GitHub Release con binari e `manifest.json`.
+3. **Caricamento**: in console, **Aggiornamenti agente → Carica rilascio**. La console controlla
+   hash e firma (se `BC_RELEASE_PUBLIC_KEY` è impostata) e salva i binari nel volume `releases`.
+4. **Lancio**: "Aggiorna" su un dispositivo, su un tenant o su tutti. Viene messo in coda un
+   comando `upgrade` per ogni agente approvato di piattaforma compatibile.
+5. **Sull'agente**:
+   - download nella stessa cartella;
+   - verifica di dimensione, SHA-256 e **firma Ed25519** (la chiave è nel binario: la console da
+     sola non può far installare codice arbitrario);
+   - **prova** `bc-agent.new version`;
+   - scambio `bc-agent` → `.prev`, `.new` → `bc-agent`;
+   - uscita con codice 75: il supervisore QPKG o il servizio Windows lo riavvia subito.
+6. **Esito**: il comando risulta riuscito quando l'agente torna con la nuova versione.
+7. **Rollback automatico**: se la nuova versione non arriva a un heartbeat approvato (watchdog di
+   10 minuti; oltre 3 avvii), si ripristina `.prev`. La console apre il problema "Aggiornamento
+   fallito".
 
 ## Protocollo agente ↔ console (v1)
 
@@ -121,8 +136,11 @@ Schemi: `console/backend/app/schemas/agent.py` (lato Go: `agent/internal/client`
 | `POST /agent/v1/heartbeat` | mTLS | stato, versione, ruoli, capacità; risposta: stato approvazione, versione desiderata |
 | `POST /agent/v1/inventory` | mTLS, approvato | modello, firmware, seriale, volumi, dischi... |
 | `POST /agent/v1/metrics` | mTLS, approvato | batch di metriche |
-| `POST /agent/v1/events` | mTLS, approvato | sessioni Veeam, eventi hardware, esiti dei task |
-| `GET /agent/v1/ws` | mTLS *(fase 3)* | canale di controllo: comandi, flussi shell |
+| `POST /agent/v1/events` | mTLS, approvato | eventi (es. esito aggiornamenti, rollback) |
+| `POST /agent/v1/veeam` | mTLS, approvato | report Veeam normalizzato (job, repository, licenza) |
+| `GET /agent/v1/commands/next` | mTLS, approvato | long-poll: prossimo comando in coda (204 se nessuno) |
+| `POST /agent/v1/commands/{id}/output` · `/result` | mTLS, approvato | output a blocchi ed esito |
+| `GET /agent/v1/releases/{ver}/{piattaforma}` | mTLS, approvato | download del binario di aggiornamento |
 
 Envelope comune: `{msg_id, seq, ts, payload}`. `msg_id` rende idempotente il reinvio
 dei dati bufferizzati.
@@ -150,17 +168,29 @@ dei dati bufferizzati.
 - `GET /api/v1/problems` mostra tutti i tenant accessibili in un'unica lista;
   `GET /api/v1/problems/summary` dà i conteggi per tenant.
 
-## Veeam *(fase 2)*
+## Veeam
 
-| Target | Fonte primaria | Note |
+Il collector gira sul server VBR, o sul PC per Veeam Agent, ed esegue script PowerShell
+incorporati nell'agente, come LocalSystem. Il gruppo Administrators locale è amministratore
+Veeam di default, quindi **non servono credenziali**. Il report parte ogni 15 minuti.
+
+| Target | Fonte | Note |
 |---|---|---|
-| B&R v11 | PowerShell (`Veeam.Backup.PowerShell`, PS 5.1) | REST v11 troppo limitata; v11 è fuori supporto |
-| B&R v12.x | REST API `https://localhost:9419` | fallback PowerShell |
-| B&R v13 | REST API | modulo PS su PowerShell 7 (da verificare); appliance Linux → agente in "collector remoto" su un Windows del sito |
-| Veeam Agent for Windows | Event Log Application (sessioni) | `Veeam.Agent.Configurator.exe -export` per la config, `Veeam.EndPoint.Manager.exe /backup` per il backup on demand |
+| B&R v11 / v12 | modulo `Veeam.Backup.PowerShell` su Windows PowerShell 5.1 | `Get-VBRJob` + `FindLastSession()`, `Get-VBRComputerBackupJob`, `Get-VBRBackupCopyJob`, repository e scale-out, licenza |
+| B&R v13 | come sopra; se il modulo non si carica su PS 5.1 si ripiega su `pwsh` (PowerShell 7) | da verificare sulla build installata; l'appliance Linux (VSA) richiederà un collector REST remoto |
+| Veeam Agent for Windows (standalone) | Event Log (canale "Veeam Agent", evento 190 = fine job) | ID e testo dei messaggi da verificare sulle versioni installate |
 
-L'output è normalizzato (job, sessione, esito, durata, dimensione, repository), così la
-console non deve conoscere le versioni.
+- Gli script restituiscono JSON già normalizzato: date ISO UTC, esiti `Success/Warning/Failed/None`.
+- Ogni sezione è isolata: un cmdlet mancante in una versione finisce in `errors`, mostrato in
+  console, senza bloccare il resto.
+- Problemi generati:
+  - `veeam.job_result`: fallito → critico, avvisi → attenzione;
+  - `veeam.last_success_age_h`: nessun successo da 36/72 ore (soglie a cascata);
+  - `veeam.repo_used_pct`: 85/95%;
+  - `veeam.license`: scadenza a meno di 30 giorni o già scaduta.
+- I job disabilitati sono ignorati; quelli eliminati in Veeam spariscono dalla console.
+- `bc-agent collect` sul server stampa il report senza inviarlo: è il primo test da fare su
+  ogni versione di Veeam.
 
 ## Roadmap
 
@@ -168,6 +198,8 @@ console non deve conoscere le versioni.
    - ✅ enrollment mTLS, heartbeat, inventario, metriche, problemi, multi-tenant;
    - ✅ frontend (problemi, dispositivi con grafico storico, approvazioni, tenant e token);
    - ✅ QPKG per x86_64, arm_64, arm-x41, arm-x31 con supervisore e log;
+   - ✅ collector Veeam (B&R v11/v12/v13, Veeam Agent), servizio Windows con `bc-agent install`;
+   - ✅ esecuzione remota con sessione elevata TOTP, aggiornamenti firmati con rollback;
    - ⬜ login Entra ID end-to-end;
    - ⬜ notifiche email/Teams;
    - ⬜ buffer locale nell'agente.

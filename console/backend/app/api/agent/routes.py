@@ -1,15 +1,26 @@
+import asyncio
 import hashlib
+import time
 import uuid
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request, Response, status
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.agent.deps import AgentDep, ApprovedAgentDep, CADep, SessionDep
 from app.config import settings
+from app.db import SessionLocal
 from app.models import (
+    FINAL_STATUSES,
+    MAX_OUTPUT,
     Agent,
+    Command,
+    CommandStatus,
+    CommandType,
+    ReleaseAsset,
+    Severity,
     AgentMessage,
     AgentStatus,
     Device,
@@ -30,10 +41,16 @@ from app.schemas.agent import (
     IngestResponse,
     InventoryPayload,
     MetricsPayload,
+    AgentCommand,
+    CommandOutputIn,
+    CommandResultIn,
+    VeeamPayload,
 )
 from app.services.audit import audit
 from app.services.ca import CSRError
-from app.services.problems import evaluate_metrics, resolve_problem
+from app.services import veeam as veeam_service
+from app.services.problems import evaluate_metrics, raise_problem, resolve_problem
+from app.services.releases import asset_path
 
 router = APIRouter(prefix="/agent/v1", tags=["agent"])
 
@@ -122,8 +139,25 @@ async def heartbeat(body: HeartbeatRequest, request: Request, agent: AgentDep, s
         agent.device.roles = list(body.roles)
     if agent.status == AgentStatus.APPROVED:
         await resolve_problem(session, agent.device_id, "agent.offline")
+        await _complete_upgrades(session, agent)
     await session.commit()
     return HeartbeatResponse(status=agent.status, server_time=now)
+
+
+async def _complete_upgrades(session: AsyncSession, agent: Agent) -> None:
+    """Un upgrade è riuscito quando l'agente si ripresenta con la versione richiesta."""
+    pending = await session.scalars(
+        select(Command).where(
+            Command.agent_id == agent.id,
+            Command.type == CommandType.UPGRADE,
+            Command.status.in_([CommandStatus.DISPATCHED, CommandStatus.RUNNING]),
+        )
+    )
+    for cmd in pending:
+        if cmd.payload.get("version") == agent.version:
+            cmd.status, cmd.finished_at, cmd.exit_code = CommandStatus.SUCCEEDED, utcnow(), 0
+            cmd.output += f"\nagente ripartito con la versione {agent.version}\n"
+            await resolve_problem(session, agent.device_id, "agent.upgrade")
 
 
 async def _first_delivery(session: AsyncSession, agent: Agent, msg_id: uuid.UUID, kind: str) -> bool:
@@ -173,5 +207,100 @@ async def events(env: Envelope[EventsPayload], agent: ApprovedAgentDep, session:
         Event(tenant_id=device.tenant_id, device_id=device.id, ts=e.ts, type=e.type, severity=e.severity, data=e.data)
         for e in env.payload.events
     )
+    for e in env.payload.events:
+        if e.type == "agent.upgrade_rollback":
+            await raise_problem(
+                session, device, "agent.upgrade", Severity.WARNING,
+                f"Aggiornamento a {e.data.get('to', '?')} fallito: ripristinata la {e.data.get('from', '?')}",
+                details=e.data,
+            )
     await session.commit()
     return IngestResponse(accepted=True)
+
+
+@router.post("/veeam", response_model=IngestResponse)
+async def veeam(env: Envelope[VeeamPayload], agent: ApprovedAgentDep, session: SessionDep):
+    if not await _first_delivery(session, agent, env.msg_id, "veeam"):
+        return IngestResponse(accepted=True, duplicate=True)
+    await veeam_service.ingest(session, agent.device, env.payload, env.ts)
+    await session.commit()
+    return IngestResponse(accepted=True)
+
+
+# --- comandi ----------------------------------------------------------------
+
+
+async def _dispatch_next(agent_id: uuid.UUID) -> AgentCommand | None:
+    async with SessionLocal() as s:
+        cmd = await s.scalar(
+            select(Command)
+            .where(Command.agent_id == agent_id, Command.status == CommandStatus.QUEUED)
+            .order_by(Command.created_at)
+            .limit(1)
+            .with_for_update(skip_locked=True)
+        )
+        if cmd is None:
+            return None
+        cmd.status, cmd.dispatched_at = CommandStatus.DISPATCHED, utcnow()
+        await s.commit()
+        return AgentCommand(id=cmd.id, type=cmd.type, timeout_s=cmd.timeout_s, payload=cmd.payload)
+
+
+@router.get("/commands/next", response_model=AgentCommand, responses={204: {"description": "nessun comando"}})
+async def next_command(agent: ApprovedAgentDep, session: SessionDep, wait: int = Query(25, ge=0, le=55)):
+    """Long-poll: risponde appena c'è un comando in coda, altrimenti 204 dopo `wait` secondi."""
+    agent_id = agent.id
+    # Rilasciamo subito la connessione: l'attesa non deve occupare il pool del DB.
+    await session.close()
+    deadline = time.monotonic() + min(wait, settings.command_poll_wait_s)
+    while True:
+        cmd = await _dispatch_next(agent_id)
+        if cmd is not None:
+            return cmd
+        if time.monotonic() >= deadline:
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
+        await asyncio.sleep(1)
+
+
+async def _own_command(session: AsyncSession, agent: Agent, command_id: uuid.UUID) -> Command:
+    cmd = await session.get(Command, command_id, with_for_update=True)
+    if cmd is None or cmd.agent_id != agent.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "comando sconosciuto")
+    if cmd.status in FINAL_STATUSES:
+        raise HTTPException(status.HTTP_409_CONFLICT, f"comando già concluso ({cmd.status})")
+    return cmd
+
+
+@router.post("/commands/{command_id}/output", status_code=204)
+async def command_output(command_id: uuid.UUID, body: CommandOutputIn, agent: ApprovedAgentDep, session: SessionDep):
+    cmd = await _own_command(session, agent, command_id)
+    cmd.status = CommandStatus.RUNNING
+    room = MAX_OUTPUT - len(cmd.output)
+    if room <= 0:
+        cmd.output_truncated = True
+    else:
+        cmd.output += body.data[:room]
+        cmd.output_truncated = len(body.data) > room
+    await session.commit()
+
+
+@router.post("/commands/{command_id}/result", status_code=204)
+async def command_result(command_id: uuid.UUID, body: CommandResultIn, agent: ApprovedAgentDep, session: SessionDep):
+    cmd = await _own_command(session, agent, command_id)
+    cmd.exit_code, cmd.error = body.exit_code, body.error
+    if cmd.type == CommandType.UPGRADE and body.status == "succeeded":
+        # Binario sostituito: la conferma arriva dall'heartbeat con la nuova versione.
+        cmd.status = CommandStatus.RUNNING
+    else:
+        cmd.status = CommandStatus(body.status)
+        cmd.finished_at = utcnow()
+    await session.commit()
+
+
+@router.get("/releases/{version}/{platform}")
+async def download_release(version: str, platform: str, agent: ApprovedAgentDep, session: SessionDep):
+    asset = await session.get(ReleaseAsset, (version, platform))
+    path = asset_path(version, platform)
+    if asset is None or not path.is_file():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "rilascio non disponibile")
+    return FileResponse(path, media_type="application/octet-stream", filename=path.name)

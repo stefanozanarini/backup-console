@@ -10,13 +10,20 @@ export class ApiError extends Error {
   }
 }
 
-export async function api<T>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
-  const headers: Record<string, string> = { ...(await authHeaders()) };
+interface ApiInit {
+  method?: string;
+  body?: unknown;
+  form?: FormData;
+  headers?: Record<string, string>;
+}
+
+export async function api<T>(path: string, init: ApiInit = {}): Promise<T> {
+  const headers: Record<string, string> = { ...(await authHeaders()), ...(init.headers ?? {}) };
   if (init.body !== undefined) headers["Content-Type"] = "application/json";
   const r = await fetch(`/api/v1${path}`, {
-    method: init.method ?? "GET",
+    method: init.method ?? (init.form ? "POST" : "GET"),
     headers,
-    body: init.body === undefined ? undefined : JSON.stringify(init.body),
+    body: init.form ?? (init.body === undefined ? undefined : JSON.stringify(init.body)),
   });
   if (!r.ok) {
     let detail = r.statusText;

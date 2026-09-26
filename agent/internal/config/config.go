@@ -1,6 +1,6 @@
 // Package config gestisce il file di configurazione locale dell'agente.
 //
-// Alcune impostazioni (allow_shell) si decidono solo in installazione e la
+// Alcune impostazioni (disable_remote_exec) si decidono solo in installazione e la
 // console non può modificarle: è il consenso locale del dispositivo.
 package config
 
@@ -20,11 +20,16 @@ type Config struct {
 	DataDir string `json:"data_dir,omitempty"`
 	// CA extra per verificare il certificato TLS del server (sviluppo o proxy con ispezione TLS).
 	ServerCAFile string `json:"server_ca_file,omitempty"`
-	AllowShell   bool   `json:"allow_shell"`
+	// Esecuzione remota di comandi dalla console: attiva di default.
+	DisableRemoteExec bool `json:"disable_remote_exec,omitempty"`
+	// Solo sviluppo: accetta aggiornamenti anche se il binario non ha una chiave
+	// pubblica di verifica incorporata. Mai in produzione.
+	AllowUnsignedUpgrades bool `json:"allow_unsigned_upgrades,omitempty"`
 
 	HeartbeatSec int `json:"heartbeat_sec,omitempty"`
 	MetricsSec   int `json:"metrics_sec,omitempty"`
 	InventorySec int `json:"inventory_sec,omitempty"`
+	VeeamSec     int `json:"veeam_sec,omitempty"`
 
 	path string
 }
@@ -77,7 +82,12 @@ func (c *Config) applyDefaults() {
 	if c.InventorySec <= 0 {
 		c.InventorySec = 3600
 	}
+	if c.VeeamSec <= 0 {
+		c.VeeamSec = 900
+	}
 }
+
+func (c *Config) RemoteExecAllowed() bool { return !c.DisableRemoteExec }
 
 func (c *Config) Save() error {
 	if err := os.MkdirAll(filepath.Dir(c.path), 0o700); err != nil {

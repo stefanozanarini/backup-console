@@ -38,7 +38,8 @@ packaging/qpkg/build.sh 0.1.0 agent/dist dist/qpkg
    QPKG_DIR=$(/sbin/getcfg BackupConsoleAgent Install_Path -f /etc/config/qpkg.conf)
    sh "$QPKG_DIR/bc-agent.sh" enroll -server https://agents.<dominio> -token <TOKEN>
    ```
-   L'agente parte subito e compare in **Approvazioni**.
+   L'agente parte subito e compare in **Approvazioni**. L'esecuzione remota di comandi è attiva:
+   per un NAS dove non la si vuole, aggiungere `-disable-remote-exec`.
 4. Approvare il dispositivo in console.
 
 ### Uso
@@ -50,18 +51,21 @@ packaging/qpkg/build.sh 0.1.0 agent/dist dist/qpkg
 - Configurazione, chiave e certificato: `$QPKG_DIR/etc/`. Non fanno parte del pacchetto,
   quindi restano durante gli aggiornamenti (l'installer QDK estrae sopra la directory
   esistente).
-- Un supervisore riavvia l'agente dopo 15 secondi se termina.
+- Un supervisore riavvia l'agente dopo 15 secondi se termina, oppure subito dopo un aggiornamento
+  (codice di uscita 75).
+- Aggiornamenti dalla console: il binario viene sostituito in `$QPKG_DIR/bc-agent` e la versione
+  precedente resta in `bc-agent.prev`, per il rollback automatico. Per passare a una nuova
+  versione dello script di servizio serve invece reinstallare il QPKG.
 - Senza registrazione lo start non fallisce: segnala solo che manca l'enroll.
 - Disinstallazione da App Center: ferma il servizio e rimuove la directory, compresa
   l'identità dell'agente. Poi va revocato il dispositivo in console.
 
-## MSI (Windows) – `msi/`
+## Windows
 
-- WiX Toolset v5, *MajorUpgrade* per gli aggiornamenti.
-- Proprietà per l'installazione silenziosa:
-  ```bash
-  msiexec /i bc-agent.msi SERVER_URL=https://agents.<dominio> ENROLL_TOKEN=<token> ALLOW_SHELL=0 /qn
-  ```
-- Registra `bc-agent` come servizio Windows (LocalSystem, riavvio automatico) ed esegue
-  l'enrollment durante l'installazione.
-- Firma Authenticode tramite Azure Trusted Signing.
+Per ora l'installer è l'eseguibile stesso: `bc-agent.exe install -server … -token …` (vedi il
+README principale). Si distribuisce anche via GPO, Intune o script.
+
+Da fare:
+- **MSI** (WiX v5, *MajorUpgrade*) con le proprietà `SERVER_URL`, `ENROLL_TOKEN`,
+  `DISABLE_REMOTE_EXEC`, che chiami `bc-agent.exe install`;
+- **firma Authenticode** (Azure Trusted Signing), per evitare gli avvisi di SmartScreen/Defender.

@@ -13,6 +13,7 @@ os.environ.update(
     BC_DB_POOL="false",
     BC_AUTH_MODE="dev",
     BC_CA_DIR=tempfile.mkdtemp(prefix="bc-ca-"),
+    BC_RELEASES_DIR=tempfile.mkdtemp(prefix="bc-rel-"),
 )
 
 import httpx  # noqa: E402
