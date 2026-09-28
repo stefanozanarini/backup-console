@@ -20,6 +20,7 @@ import (
 	"backupconsole/agent/internal/collector/system"
 	"backupconsole/agent/internal/collector/veeam"
 	"backupconsole/agent/internal/config"
+	"backupconsole/agent/internal/status"
 	"backupconsole/agent/internal/upgrade"
 	"backupconsole/agent/internal/version"
 )
@@ -83,6 +84,7 @@ type Agent struct {
 	collectors []collector.Collector
 	started    time.Time
 	status     string
+	lastOK     time.Time
 	approved   atomic.Bool
 	healthy    sync.Once
 	wasHealthy atomic.Bool
@@ -209,13 +211,18 @@ func (a *Agent) heartbeat(ctx context.Context) {
 	}, &resp)
 	if err != nil {
 		var he *client.HTTPError
+		state := "unreachable"
 		if errors.As(err, &he) && he.Status == http.StatusForbidden {
 			log.Printf("heartbeat rifiutato: agente revocato? (%v)", err)
+			state = "revoked"
 		} else {
 			log.Printf("heartbeat: %v", err)
 		}
+		a.writeStatus(state, err)
 		return
 	}
+	a.lastOK = time.Now()
+	a.writeStatus(resp.Status, nil)
 	if resp.Status != a.status {
 		log.Printf("stato agente: %s", resp.Status)
 		a.status = resp.Status
@@ -224,6 +231,21 @@ func (a *Agent) heartbeat(ctx context.Context) {
 	if a.approved.Load() {
 		a.wasHealthy.Store(true)
 		a.healthy.Do(func() { a.reportUpgradeOutcome(ctx) })
+	}
+}
+
+// writeStatus aggiorna il file letto dall'icona nella tray (solo Windows).
+func (a *Agent) writeStatus(state string, err error) {
+	host, _ := os.Hostname()
+	st := status.Status{
+		Version: version.Version, State: state, Server: a.cfg.ServerURL, Device: host,
+		RemoteExec: a.cfg.RemoteExecAllowed(), LastContact: a.lastOK, UpdatedAt: time.Now(),
+	}
+	if err != nil {
+		st.LastError = err.Error()
+	}
+	if werr := status.Write(status.Path(), st); werr != nil {
+		log.Printf("file di stato: %v", werr)
 	}
 }
 

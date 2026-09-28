@@ -53,9 +53,15 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#agent-v}"
           [ "${GITHUB_REF_TYPE}" = tag ] || VERSION="0.0.0-${GITHUB_SHA::8}"
-          EXT=""; [ "$GOOS" = windows ] && EXT=".exe"
+          EXT="" TAGS=""
+          LDFLAGS="-s -w -X backupconsole/agent/internal/version.Version=${VERSION}"
+          if [ "$GOOS" = windows ]; then
+            EXT=".exe" TAGS="embedtray"
+            # Icona nella tray: programma grafico (niente console) incluso in bc-agent.exe.
+            go build -trimpath -ldflags "$LDFLAGS -H windowsgui" -o internal/trayembed/bin/bc-agent-tray.exe ./cmd/bc-agent-tray
+          fi
           mkdir -p dist
-          go build -trimpath -ldflags "-s -w -X backupconsole/agent/internal/version.Version=${VERSION} -X backupconsole/agent/internal/upgrade.PublicKey=${RELEASE_PUBLIC_KEY}" \
+          go build -tags "$TAGS" -trimpath -ldflags "$LDFLAGS -X backupconsole/agent/internal/upgrade.PublicKey=${RELEASE_PUBLIC_KEY}" \
             -o "dist/bc-agent-${{ matrix.name }}${EXT}" ./cmd/bc-agent
       - uses: actions/upload-artifact@v4
         with:

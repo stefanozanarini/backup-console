@@ -110,7 +110,17 @@ bc-agent.exe install -server https://agents.<dominio> -token <TOKEN>
 Copia l'eseguibile in `C:\Program Files\BackupConsoleAgent`, registra l'agente (configurazione,
 chiave e log in `C:\ProgramData\BackupConsoleAgent`, accessibile solo a SYSTEM e Administrators)
 e crea il servizio **Backup Console Agent**, con avvio automatico e riavvio in caso di uscita.
-L'esecuzione remota è attiva: per disattivarla aggiungere `-disable-remote-exec`. Per rimuovere
+L'esecuzione remota è attiva: per disattivarla aggiungere `-disable-remote-exec`.
+
+L'installazione aggiunge anche l'**icona nell'area di notifica** (logo AGS Media), che parte a
+ogni accesso degli utenti:
+- logo colorato quando l'agente è connesso, grigio se è in attesa di approvazione, revocato,
+  con la console non raggiungibile o con il servizio fermo;
+- il menu mostra stato, versione, ultimo contatto ed esecuzione remota, più "Apri la console";
+- l'icona legge lo stato da `C:\ProgramData\BackupConsoleAgentStatus\status.json`, scritto dal
+  servizio senza dati sensibili;
+- è inclusa in `bc-agent.exe` e si aggiorna con l'agente;
+- "Nascondi icona" la chiude solo fino al prossimo accesso. Per rimuovere
 l'agente: `bc-agent.exe uninstall [-purge]`. Rilanciare `install` su una macchina già registrata
 aggiorna binario e servizio ma mantiene la registrazione (`-reenroll` per forzarne una nuova).
 

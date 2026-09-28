@@ -36,7 +36,7 @@ connessione. Nei siti non si apre nessuna porta in ingresso.
 | DB | PostgreSQL 16 | metriche in tabella semplice, partizionamento quando serve |
 | Reverse proxy | nginx 1.27 in container (stack `edge/`, condiviso con altre app) + certbot | Let's Encrypt, mTLS agenti; guida: `docs/deploy-azure.md` |
 | Frontend | React + Vite + TypeScript, servito da nginx non privilegiato | `console/frontend` |
-| Agente | Go, binario statico senza dipendenze | `agent/` |
+| Agente | Go, binario statico senza dipendenze; su Windows include l'icona nella tray (`bc-agent-tray.exe`, GUI) | `agent/` |
 | Pacchetti | QPKG (QDK) per QNAP, MSI (WiX v5) per Windows | `packaging/` |
 | CI/CD | GitHub Actions, immagini su GHCR con tag di versione (`console-backup-vX.Y.Z`); deploy con `deploy.sh` sulla VM | `.github/workflows`, `deploy.sh` |
 

@@ -142,6 +142,7 @@ func run(args []string) error {
 	if winsvc.IsService() {
 		closeLog := logToFile(filepath.Join(cfg.DataDir, "agent.log"))
 		defer closeLog()
+		syncTrayFromService()
 		// Uscita con errore → il Service Control Manager riavvia il servizio.
 		return winsvc.Run(func(ctx context.Context) error { return runAgent(ctx, cfg) }, upgrade.ExitRestart)
 	}

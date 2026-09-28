@@ -75,6 +75,7 @@ func install(args []string) error {
 		return fmt.Errorf("avvio servizio: %w", err)
 	}
 	fmt.Printf("servizio %s installato e avviato (%s)\n", winsvc.Name, target)
+	installTray(installDir())
 	return nil
 }
 
@@ -88,6 +89,7 @@ func uninstall(args []string) error {
 	if err := winsvc.Remove(); err != nil {
 		return err
 	}
+	removeTray()
 	// L'eseguibile in uso non si può cancellare: se stiamo girando da Program Files
 	// lasciamo la directory (verrà rimossa al prossimo riavvio o a mano).
 	if err := os.RemoveAll(installDir()); err != nil {
