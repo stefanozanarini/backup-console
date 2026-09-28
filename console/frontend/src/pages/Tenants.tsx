@@ -94,10 +94,12 @@ function installCommands(server: string, token: string) {
   const windows =
     `# PowerShell come amministratore. Idempotente: se l'agente è già installato non fa nulla.\n` +
     `if (-not (Get-Service BackupConsoleAgent -ErrorAction SilentlyContinue)) {\n` +
+    `  $ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'\n` +
     `  [Net.ServicePointManager]::SecurityProtocol = 'Tls12'\n` +
     `  $t = '${token}'; $f = "$env:TEMP\\bc-agent.exe"\n` +
     `  Invoke-WebRequest -UseBasicParsing -Headers @{ 'X-Enroll-Token' = $t } -Uri '${server}/agent/v1/download/windows-amd64' -OutFile $f\n` +
     `  & $f install -server '${server}' -token $t\n` +
+    `  if ($LASTEXITCODE -ne 0) { throw "installazione non riuscita (codice $LASTEXITCODE)" }\n` +
     `  Remove-Item $f\n` +
     `}`;
   const qnap =
