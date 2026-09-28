@@ -94,6 +94,10 @@ jobs:
     if: github.ref_type == 'tag'
     needs: [build, qpkg]
     runs-on: ubuntu-latest
+    # Una sola pubblicazione alla volta per tag (evita due release/caricamenti in parallelo).
+    concurrency:
+      group: agent-release-${{ github.ref }}
+      cancel-in-progress: false
     environment: agent-release  # Environment protetto: approvazione manuale prima della firma
     permissions:
       contents: write
