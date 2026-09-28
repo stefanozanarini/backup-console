@@ -137,10 +137,22 @@ Il comando stampa la chiave pubblica. Da impostare in tre posti:
 - **GitHub → Environment `agent-release` → Secrets**: `AGENT_RELEASE_SIGNING_KEY` = contenuto di `release-signing.key`;
 - **console** (facoltativo, controllo anticipato): `BC_RELEASE_PUBLIC_KEY` nel `.env`.
 
-Un rilascio parte con un tag `agent-v0.2.0`: la CI compila, crea i QPKG, firma tutto e pubblica
-una GitHub Release. Binari, QPKG e `manifest.json` si caricano poi in console da
-**Aggiornamenti agente**. Da quel momento sono anche la versione scaricata dai comandi di
-installazione.
+Un rilascio parte con un tag `agent-v0.2.0`: la CI compila, crea i QPKG, firma tutto, pubblica
+una GitHub Release e **carica il rilascio in console**. Da quel momento è la versione scaricata
+dai comandi di installazione. Gli agenti già installati si aggiornano solo quando lo decidi tu
+("Aggiorna" in **Aggiornamenti agente**).
+
+Per il caricamento automatico, una volta sola:
+1. sulla VM crea una chiave che può solo caricare rilasci:
+   `docker compose exec api python -m app.cli create-api-key github-ci --scope releases:upload`
+   (da `console/deploy`);
+2. su GitHub, nell'environment `agent-release`, aggiungi il secret `CONSOLE_RELEASE_TOKEN` con
+   la chiave stampata;
+3. tra le variabili del repository aggiungi `CONSOLE_URL` = `https://backup-console.agsmedia.it`.
+
+Con `list-api-keys` si vede l'ultimo uso delle chiavi, con `revoke-api-key github-ci` si
+revoca. Senza questa configurazione il passo viene saltato e il caricamento si fa a mano da
+**Aggiornamenti agente**.
 
 I binari compilati senza chiave pubblica (build locali) rifiutano gli aggiornamenti remoti. In
 sviluppo si può usare `enroll -allow-unsigned-upgrades`.

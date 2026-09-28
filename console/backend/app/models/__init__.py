@@ -5,7 +5,7 @@ from app.models.device import Agent, AgentStatus, Device, DeviceKind, Enrollment
 from app.models.releases import PACKAGES, PLATFORMS, Release, ReleaseAsset
 from app.models.problems import CheckRule, Problem, ProblemState, Severity
 from app.models.telemetry import AgentMessage, Event, InventorySnapshot, Metric
-from app.models.tenancy import Elevation, LocalSession, Role, RoleAssignment, Site, Tenant, User
+from app.models.tenancy import ApiKey, Elevation, LocalSession, Role, RoleAssignment, Site, Tenant, User
 from app.models.veeam import VeeamJob
 
 __all__ = [
@@ -17,6 +17,7 @@ __all__ = [
     "Command",
     "CommandStatus",
     "CommandType",
+    "ApiKey",
     "Elevation",
     "LocalSession",
     "Release",

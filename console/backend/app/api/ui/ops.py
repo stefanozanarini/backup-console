@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.agent.routes import client_ip
+from app.api.apikeys import superadmin_or_key
 from app.auth import CurrentUser, CurrentUserDep
 from app.config import settings
 from app.db import get_session
@@ -212,14 +213,14 @@ async def list_releases(user: CurrentUserDep, session: SessionDep):
 
 @router.post("/releases", response_model=ReleaseOut, status_code=201)
 async def upload_release(
-    user: CurrentUserDep,
     session: SessionDep,
     request: Request,
     manifest: Annotated[UploadFile, File(description="manifest.json prodotto da `bc-release sign`")],
     files: Annotated[list[UploadFile], File(description="binari bc-agent-<piattaforma>[.exe] e QPKG")],
     notes: Annotated[str | None, Form(max_length=2000)] = None,
 ):
-    user.require_superadmin()
+    """Superadmin dalla console, oppure la CI con una chiave API con scope releases:upload."""
+    actor = await superadmin_or_key(request, session, "releases:upload")
     try:
         man = json.loads(await manifest.read())
         version = man["version"]
@@ -258,10 +259,11 @@ async def upload_release(
         tmp = path.with_suffix(".tmp")
         tmp.write_bytes(uploaded[a.platform])
         tmp.replace(path)
-    session.add(Release(version=version, notes=notes, created_by=user.id))
+    session.add(Release(version=version, notes=notes, created_by=actor.user_id))
     await session.flush()
     session.add_all(assets)
-    audit(session, "release.upload", user_id=user.id, target=version, ip=client_ip(request),
+    audit(session, "release.upload", user_id=actor.user_id, target=version, ip=client_ip(request),
+          by=actor.label,
           platforms=sorted(uploaded))
     await session.commit()
     return ReleaseOut(version=version, notes=notes, created_at=utcnow(),

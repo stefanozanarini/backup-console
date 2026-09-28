@@ -1,4 +1,5 @@
 import uuid
+from typing import Any
 from datetime import datetime
 from enum import StrEnum
 
@@ -94,3 +95,16 @@ class LocalSession(UUIDPk, Base):
     ip: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     expires_at: Mapped[datetime]
+
+
+class ApiKey(UUIDPk, Base):
+    """Chiave per automazioni (es. la CI che carica i rilasci): solo gli scope indicati."""
+
+    __tablename__ = "api_keys"
+
+    name: Mapped[str] = mapped_column(String(100), unique=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    scopes: Mapped[list[Any]] = mapped_column(default=list)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    last_used_at: Mapped[datetime | None]
+    revoked_at: Mapped[datetime | None]

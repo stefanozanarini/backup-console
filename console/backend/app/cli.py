@@ -9,6 +9,8 @@
   set-password EMAIL           password per il login locale (BC_LOCAL_LOGIN); configura
                                anche il TOTP se l'utente non l'ha ancora
   clear-password EMAIL         rimuove la password (niente più login locale per l'utente)
+  create-api-key NOME --scope releases:upload   chiave per automazioni (mostrata una volta)
+  list-api-keys | revoke-api-key NOME
 """
 
 import argparse
@@ -24,7 +26,7 @@ from sqlalchemy import select
 from app.api.agent.routes import hash_token
 from app.config import settings
 from app.db import SessionLocal
-from app.models import EnrollmentToken, Role, RoleAssignment, Site, Tenant, User
+from app.models import ApiKey, EnrollmentToken, Role, RoleAssignment, Site, Tenant, User
 from app.models.base import utcnow
 from app.services.audit import audit
 from app.services import secrets as secret_store
@@ -153,6 +155,43 @@ async def clear_password(email: str) -> None:
         print(f"password rimossa per {user.email}")
 
 
+async def create_api_key(name: str, scopes: list[str]) -> None:
+    from app.api.apikeys import SCOPES, new_api_key
+
+    bad = set(scopes) - SCOPES
+    if bad:
+        sys.exit(f"scope sconosciuti: {', '.join(sorted(bad))} (disponibili: {', '.join(sorted(SCOPES))})")
+    async with SessionLocal() as session:
+        if await session.scalar(select(ApiKey).where(ApiKey.name == name, ApiKey.revoked_at.is_(None))):
+            sys.exit(f"esiste già una chiave attiva di nome {name}: revocarla prima")
+        token, digest = new_api_key()
+        session.add(ApiKey(name=f"{name}", token_hash=digest, scopes=sorted(set(scopes))))
+        audit(session, "api_key.create", target=name, scopes=sorted(set(scopes)), via="cli")
+        await session.commit()
+        print(f"chiave API {name} ({', '.join(scopes)}), mostrata una sola volta:\n{token}")
+
+
+async def list_api_keys() -> None:
+    async with SessionLocal() as session:
+        for k in await session.scalars(select(ApiKey).order_by(ApiKey.created_at)):
+            state = f"revocata {k.revoked_at:%Y-%m-%d}" if k.revoked_at else "attiva"
+            used = f"ultimo uso {k.last_used_at:%Y-%m-%d %H:%M}" if k.last_used_at else "mai usata"
+            print(f"{k.name:24} {','.join(k.scopes):20} {state:20} {used}")
+
+
+async def revoke_api_key(name: str) -> None:
+    async with SessionLocal() as session:
+        key = await session.scalar(select(ApiKey).where(ApiKey.name == name, ApiKey.revoked_at.is_(None)))
+        if key is None:
+            sys.exit(f"nessuna chiave attiva di nome {name}")
+        key.revoked_at = utcnow()
+        # Il nome torna libero per una nuova chiave.
+        key.name = f"{name}#revocata-{key.id.hex[:8]}"
+        audit(session, "api_key.revoke", target=name, via="cli")
+        await session.commit()
+        print(f"chiave {name} revocata")
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="python -m app.cli")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -177,6 +216,11 @@ def main() -> None:
     r.add_argument("email")
     for name in ("set-password", "clear-password"):
         sub.add_parser(name).add_argument("email")
+    a = sub.add_parser("create-api-key")
+    a.add_argument("name")
+    a.add_argument("--scope", action="append", required=True)
+    sub.add_parser("list-api-keys")
+    sub.add_parser("revoke-api-key").add_argument("name")
     args = p.parse_args()
 
     match args.cmd:
@@ -200,6 +244,12 @@ def main() -> None:
             asyncio.run(set_password(args.email))
         case "clear-password":
             asyncio.run(clear_password(args.email))
+        case "create-api-key":
+            asyncio.run(create_api_key(args.name, args.scope))
+        case "list-api-keys":
+            asyncio.run(list_api_keys())
+        case "revoke-api-key":
+            asyncio.run(revoke_api_key(args.name))
 
 
 if __name__ == "__main__":
