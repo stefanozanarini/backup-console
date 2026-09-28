@@ -51,6 +51,10 @@ class User(UUIDPk, Base):
     totp_enabled: Mapped[bool] = mapped_column(default=False)
     # Ultimo intervallo TOTP accettato: impedisce di riusare lo stesso codice.
     totp_last_counter: Mapped[int | None] = mapped_column(BigInteger)
+    # Login locale (temporaneo, BC_LOCAL_LOGIN): hash scrypt, mai la password in chiaro.
+    password_hash: Mapped[str | None] = mapped_column(String(300))
+    failed_logins: Mapped[int] = mapped_column(default=0)
+    locked_until: Mapped[datetime | None]
 
     roles: Mapped[list["RoleAssignment"]] = relationship(back_populates="user", lazy="selectin")
 
@@ -75,6 +79,18 @@ class Elevation(UUIDPk, Base):
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     token_hash: Mapped[str] = mapped_column(String(64), unique=True)
     reason: Mapped[str] = mapped_column(String(300))
+    ip: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    expires_at: Mapped[datetime]
+
+
+class LocalSession(UUIDPk, Base):
+    """Sessione del login locale: il token (solo hash nel DB) va nell'header Authorization."""
+
+    __tablename__ = "local_sessions"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
     ip: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     expires_at: Mapped[datetime]

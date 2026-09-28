@@ -4,6 +4,7 @@ Gli utenti sono pre-registrati (CLI o API superadmin): un login Entra ID valido
 ma senza utente corrispondente riceve 403.
 """
 
+import hashlib
 import uuid
 from dataclasses import dataclass
 from functools import lru_cache
@@ -16,7 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.db import get_session
-from app.models import Role, User
+from app.models import LocalSession, Role, User
+from app.models.base import utcnow
 
 GLOBAL_READ_ROLES = {Role.SUPERADMIN, Role.OPERATOR}
 WRITE_ROLES = {Role.SUPERADMIN, Role.OPERATOR, Role.TENANT_ADMIN}
@@ -103,7 +105,10 @@ async def get_current_user(
         auth = request.headers.get("authorization", "")
         if not auth.lower().startswith("bearer "):
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "bearer token mancante")
-        claims = _decode_oidc(auth[7:])
+        token = auth[7:].strip()
+        if token.startswith(LOCAL_TOKEN_PREFIX):
+            return await _local_session_user(session, token)
+        claims = _decode_oidc(token)
         subject = claims.get("oid") or claims["sub"]
         email = claims.get("preferred_username") or claims.get("email") or claims.get("upn")
         user = await session.scalar(select(User).where(User.oidc_subject == subject))
@@ -117,6 +122,29 @@ async def get_current_user(
                 await session.commit()
 
     if user is None or not user.is_active:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "utente non abilitato")
+    return CurrentUser(user)
+
+
+LOCAL_TOKEN_PREFIX = "bcs_"
+
+
+def hash_session_token(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+async def _local_session_user(session: AsyncSession, token: str) -> CurrentUser:
+    if not settings.local_login:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "login locale disabilitato")
+    row = await session.scalar(
+        select(LocalSession).where(
+            LocalSession.token_hash == hash_session_token(token), LocalSession.expires_at > utcnow()
+        )
+    )
+    user = await session.get(User, row.user_id) if row else None
+    if user is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "sessione scaduta")
+    if not user.is_active:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "utente non abilitato")
     return CurrentUser(user)
 

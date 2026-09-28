@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { authHeaders } from "./auth";
+import { authHeaders, clearLocalSession, hasLocalSession } from "./auth";
 
 export class ApiError extends Error {
   constructor(
@@ -25,6 +25,11 @@ export async function api<T>(path: string, init: ApiInit = {}): Promise<T> {
     headers,
     body: init.form ?? (init.body === undefined ? undefined : JSON.stringify(init.body)),
   });
+  if (r.status === 401 && hasLocalSession()) {
+    // Sessione locale scaduta o revocata: di nuovo alla schermata di login.
+    clearLocalSession();
+    window.location.reload();
+  }
   if (!r.ok) {
     let detail = r.statusText;
     try {

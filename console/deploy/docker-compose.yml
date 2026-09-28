@@ -12,6 +12,7 @@ x-backend: &backend
     BC_DATABASE_URL: postgresql+asyncpg://bc:${POSTGRES_PASSWORD}@db:5432/bc
     BC_CA_DIR: /data/ca
     BC_AUTH_MODE: ${BC_AUTH_MODE:-oidc}
+    BC_LOCAL_LOGIN: ${BC_LOCAL_LOGIN:-false}
     BC_OIDC_ISSUER: ${BC_OIDC_ISSUER:-}
     BC_OIDC_AUDIENCE: ${BC_OIDC_AUDIENCE:-}
     BC_OIDC_JWKS_URL: ${BC_OIDC_JWKS_URL:-}

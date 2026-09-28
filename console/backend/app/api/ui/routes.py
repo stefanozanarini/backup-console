@@ -68,6 +68,7 @@ async def auth_config() -> dict[str, Any]:
         return {"mode": "dev", "agents_url": settings.agents_url}
     return {
         "mode": "oidc",
+        "local_login": settings.local_login,
         "agents_url": settings.agents_url,
         "client_id": settings.oidc_spa_client_id,
         "authority": settings.oidc_authority,

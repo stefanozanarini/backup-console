@@ -45,6 +45,13 @@ class Settings(BaseSettings):
     # da altri container sulla rete "proxy" che chiamino l'api direttamente.
     proxy_secret: str = ""
 
+    # Login con utente locale (password + TOTP) in aggiunta a Entra ID. Temporaneo:
+    # da disattivare quando il login Entra ID è operativo.
+    local_login: bool = False
+    local_session_hours: int = 12
+    login_max_failures: int = 5
+    login_lock_minutes: int = 15
+
     enroll_token_ttl_hours: int = 24
     agent_offline_after_s: int = 300
     worker_interval_s: int = 60

@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.api.agent.routes import router as agent_router
+from app.api.ui.local_auth import router as local_auth_router
 from app.api.ui.ops import router as ops_router
 from app.api.ui.routes import router as ui_router
 from app.config import settings
@@ -24,6 +25,7 @@ app = FastAPI(title="Backup Console", version=settings.build_version, lifespan=l
 app.include_router(agent_router)
 app.include_router(ui_router)
 app.include_router(ops_router)
+app.include_router(local_auth_router)
 
 
 @app.get("/healthz", include_in_schema=False)

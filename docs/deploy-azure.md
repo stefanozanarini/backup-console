@@ -195,6 +195,33 @@ cd /dati/containers/backup-console/app/console/deploy
 docker compose exec api python -m app.cli create-user stefano.zanarini@agsmedia.it
 ```
 
+### Login con utente locale (temporaneo, finché Entra ID non funziona)
+
+1. Nel `.env` della console impostare `BC_LOCAL_LOGIN=true`, poi applicare con
+   `cd /dati/containers/backup-console/app && ./deploy.sh`.
+2. Impostare la password:
+
+   ```bash
+   cd /dati/containers/backup-console/app/console/deploy
+   docker compose exec api python -m app.cli set-password stefano.zanarini@agsmedia.it
+   ```
+
+   La password va digitata due volte e deve avere almeno 12 caratteri. Se l'utente non ha
+   ancora il codice TOTP, il comando lo crea e stampa la **chiave**: va aggiunta subito
+   all'app di autenticazione (Microsoft/Google Authenticator → aggiungi account → inserisci
+   la chiave a mano).
+
+Per entrare servono email, password e codice a 6 cifre. Le protezioni:
+- dopo 5 tentativi sbagliati l'utente viene bloccato per 15 minuti;
+- nginx limita i tentativi a 10 al minuto per IP;
+- la sessione dura 12 ore e vale solo per la scheda del browser;
+- ogni accesso, riuscito o fallito, finisce nell'audit.
+
+Quando Entra ID funziona:
+1. `BC_LOCAL_LOGIN=false` nel `.env`;
+2. `./deploy.sh`: le sessioni locali aperte smettono di valere subito;
+3. eventualmente `python -m app.cli clear-password <email>`.
+
 ## 8. Login con Entra ID
 
 In **Entra ID → Registrazioni app** servono due registrazioni.

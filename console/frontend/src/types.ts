@@ -223,4 +223,4 @@ export interface TokenInfo {
 
 export type AuthConfig =
   | { mode: "dev"; agents_url: string }
-  | { mode: "oidc"; agents_url: string; client_id: string; authority: string; scopes: string[] };
+  | { mode: "oidc"; agents_url: string; client_id: string; authority: string; scopes: string[]; local_login?: boolean };

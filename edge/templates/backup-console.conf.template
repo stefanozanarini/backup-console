@@ -5,6 +5,8 @@
 
 # Limite su enrollment e download con token (per IP).
 limit_req_zone $binary_remote_addr zone=bc_enroll:10m rate=20r/m;
+# Login locale: contro i tentativi di indovinare le password (in più al blocco del backend).
+limit_req_zone $binary_remote_addr zone=bc_login:10m rate=10r/m;
 
 server {
     listen 443 ssl;
@@ -32,6 +34,7 @@ server {
     # --- agenti -------------------------------------------------------------
     location ~ ^/agent/v1/(enroll|download/) {
         limit_req zone=bc_enroll burst=30 nodelay;
+        limit_req_status 429;
         include snippets/backup-console-agent.conf;
     }
     location /agent/v1/ {
@@ -42,6 +45,15 @@ server {
     }
 
     # --- utenti -------------------------------------------------------------
+    location = /api/v1/auth/login {
+        limit_req zone=bc_login burst=5 nodelay;
+        limit_req_status 429;
+        include snippets/proxy.conf;
+        proxy_set_header X-Client-Verify "";
+        proxy_set_header X-Client-Cert   "";
+        proxy_set_header X-Proxy-Secret  "";
+        proxy_pass $bc_api;
+    }
     location /api/ {
         include snippets/proxy.conf;
         # Gli header del certificato client esistono solo per /agent/v1/.

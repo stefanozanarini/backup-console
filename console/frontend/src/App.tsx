@@ -25,7 +25,7 @@ export default function App() {
     initAuth()
       .then(async (s) => {
         setSession(s);
-        if (!s.email) return;
+        if (!s.method) return;
         try {
           const [m, t] = await Promise.all([api<Me>("/me"), api<Tenant[]>("/tenants")]);
           setMe(m);
@@ -61,7 +61,7 @@ export default function App() {
 
   if (fatal) return <div className="login"><div className="card"><div className="alert">{fatal}</div></div></div>;
   if (!session) return null;
-  if (!session.email || denied) return <Login session={session} denied={denied} />;
+  if (!session.method || denied) return <Login session={session} denied={denied} />;
   if (!ctx) return null;
 
   return (

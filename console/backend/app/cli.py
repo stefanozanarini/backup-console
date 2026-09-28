@@ -6,10 +6,14 @@
   create-site SLUG NOME
   create-token SLUG NOME_SITO [--note TESTO] [--uses N] [--hours H]
   reset-totp EMAIL             disattiva il TOTP di un utente (che dovrà riconfigurarlo)
+  set-password EMAIL           password per il login locale (BC_LOCAL_LOGIN); configura
+                               anche il TOTP se l'utente non l'ha ancora
+  clear-password EMAIL         rimuove la password (niente più login locale per l'utente)
 """
 
 import argparse
 import asyncio
+import getpass
 import secrets
 import sys
 from datetime import timedelta
@@ -24,6 +28,8 @@ from app.models import EnrollmentToken, Role, RoleAssignment, Site, Tenant, User
 from app.models.base import utcnow
 from app.services.audit import audit
 from app.services import secrets as secret_store
+from app.services import totp
+from app.services.passwords import MIN_LENGTH, hash_password
 from app.services.ca import AgentCA
 
 
@@ -109,6 +115,44 @@ async def reset_totp(email: str) -> None:
         print(f"TOTP disattivato per {user.email}")
 
 
+async def set_password(email: str) -> None:
+    async with SessionLocal() as session:
+        user = await session.scalar(select(User).where(User.email == email.lower()))
+        if user is None:
+            sys.exit(f"utente {email} non trovato (crearlo prima con create-user)")
+        pw = getpass.getpass(f"Nuova password per {user.email} (min {MIN_LENGTH} caratteri): ")
+        if len(pw) < MIN_LENGTH:
+            sys.exit(f"password troppo corta: servono almeno {MIN_LENGTH} caratteri")
+        if getpass.getpass("Ripeti la password: ") != pw:
+            sys.exit("le password non coincidono")
+        user.password_hash, user.failed_logins, user.locked_until = hash_password(pw), 0, None
+        new_totp = None
+        if not user.totp_enabled:
+            new_totp = totp.new_secret()
+            user.totp_secret_enc, user.totp_enabled, user.totp_last_counter = secret_store.encrypt(new_totp), True, None
+        audit(session, "password.set", target=user.email, via="cli", totp_created=new_totp is not None)
+        await session.commit()
+        print(f"password impostata per {user.email}")
+        if new_totp:
+            print("\nCodice di sicurezza (TOTP) creato: aggiungilo ORA all'app di autenticazione")
+            print("(Microsoft/Google Authenticator → aggiungi account → inserisci chiave manualmente)")
+            print(f"  Account: Backup Console ({user.email})")
+            print(f"  Chiave:  {' '.join(new_totp[i:i + 4] for i in range(0, len(new_totp), 4))}")
+            print(f"  URI:     {totp.provisioning_uri(new_totp, user.email)}")
+            print("La chiave non verrà mostrata di nuovo (per rigenerarla: reset-totp, poi set-password).")
+
+
+async def clear_password(email: str) -> None:
+    async with SessionLocal() as session:
+        user = await session.scalar(select(User).where(User.email == email.lower()))
+        if user is None:
+            sys.exit(f"utente {email} non trovato")
+        user.password_hash = None
+        audit(session, "password.clear", target=user.email, via="cli")
+        await session.commit()
+        print(f"password rimossa per {user.email}")
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="python -m app.cli")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -131,6 +175,8 @@ def main() -> None:
     k.add_argument("--hours", type=int)
     r = sub.add_parser("reset-totp")
     r.add_argument("email")
+    for name in ("set-password", "clear-password"):
+        sub.add_parser(name).add_argument("email")
     args = p.parse_args()
 
     match args.cmd:
@@ -150,6 +196,10 @@ def main() -> None:
             asyncio.run(create_token(args.tenant_slug, args.site_name, args.note, args.uses, args.hours))
         case "reset-totp":
             asyncio.run(reset_totp(args.email))
+        case "set-password":
+            asyncio.run(set_password(args.email))
+        case "clear-password":
+            asyncio.run(clear_password(args.email))
 
 
 if __name__ == "__main__":
