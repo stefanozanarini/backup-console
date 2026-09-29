@@ -142,7 +142,8 @@ func (c *Collector) Metrics(context.Context) ([]collector.Metric, error) { retur
 
 // Report esegue lo script e ritorna il payload per /agent/v1/veeam.
 func (c *Collector) Report(ctx context.Context) (string, any, error) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	// Lo storico delle sessioni su server VBR con molti job può richiedere qualche minuto.
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 	out, err := c.run(ctx, commonPS+"\n"+c.script)
 	if err != nil {

@@ -232,6 +232,9 @@ async def metrics(env: Envelope[MetricsPayload], agent: ApprovedAgentDep, sessio
     return IngestResponse(accepted=True)
 
 
+COLLECTOR_LABELS = {"veeam_vbr": "Veeam B&R", "veeam_vaw": "Veeam Agent"}
+
+
 @router.post("/events", response_model=IngestResponse)
 async def events(env: Envelope[EventsPayload], agent: ApprovedAgentDep, session: SessionDep):
     if not await _first_delivery(session, agent, env.msg_id, "events"):
@@ -247,6 +250,14 @@ async def events(env: Envelope[EventsPayload], agent: ApprovedAgentDep, session:
                 session, device, "agent.upgrade", Severity.WARNING,
                 f"Aggiornamento a {e.data.get('to', '?')} fallito: ripristinata la {e.data.get('from', '?')}",
                 details=e.data,
+            )
+        elif e.type == "collector.report_failed":
+            collector = str(e.data.get("collector", "?"))[:50]
+            label = COLLECTOR_LABELS.get(collector, collector)
+            await raise_problem(
+                session, device, "agent.collector", Severity.WARNING, f"Raccolta dati {label} non riuscita",
+                {"collector": collector}, {"collector": collector, "error": str(e.data.get("error", ""))[:2000],
+                                           "at": e.ts.isoformat()},
             )
     await session.commit()
     return IngestResponse(accepted=True)

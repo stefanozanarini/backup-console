@@ -164,6 +164,8 @@ const DETAIL_LABELS: Record<string, string> = {
   job: "Job", result: "Esito", last_end: "Fine ultima sessione", last_success: "Ultimo backup riuscito",
   expiration: "Scadenza", value: "Valore", warn: "Soglia attenzione", crit: "Soglia critica",
   retries: "Retry", repo: "Repository", mount: "Volume", disk: "Disco",
+  error: "Errore", collector: "Raccolta", at: "Quando", reported_at: "Ultimo report ricevuto",
+  agent_version: "Versione agente", last_seen_at: "Ultimo contatto",
 };
 const HIDDEN = new Set(["messages", "sessions"]);
 

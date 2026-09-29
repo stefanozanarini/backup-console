@@ -297,6 +297,13 @@ func (a *Agent) sendReports(ctx context.Context) {
 		path, payload, err := r.Report(ctx)
 		if err != nil {
 			log.Printf("report %s: %v", c.Name(), err)
+			// In console diventa un problema, chiuso dal primo report riuscito.
+			msg := err.Error()
+			if len(msg) > 2000 {
+				msg = msg[:2000]
+			}
+			a.sendEvent(ctx, client.Event{TS: time.Now().UTC(), Type: "collector.report_failed", Severity: "warning",
+				Data: map[string]any{"collector": c.Name(), "error": msg}})
 			continue
 		}
 		if err := a.client.Send(ctx, path, a.client.NewEnvelope(payload)); err != nil {

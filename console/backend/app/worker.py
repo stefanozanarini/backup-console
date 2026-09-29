@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy import select, update
 from sqlalchemy.orm import selectinload
@@ -43,6 +43,43 @@ async def check_offline_agents() -> int:
     return raised
 
 
+VEEAM_STALE = timedelta(hours=1)  # il report Veeam arriva ogni 15 minuti
+
+
+async def check_stale_veeam() -> int:
+    """Agente online ma report Veeam fermo: la raccolta si è bloccata o fallisce."""
+    now = utcnow()
+    online_since = now - timedelta(seconds=settings.agent_offline_after_s)
+    raised = 0
+    async with SessionLocal() as session:
+        agents = (
+            await session.scalars(
+                select(Agent).where(Agent.status == AgentStatus.APPROVED).options(selectinload(Agent.device))
+            )
+        ).all()
+        for agent in agents:
+            v = agent.device.veeam or {}
+            if not v.get("reported_at"):
+                continue
+            try:
+                reported = datetime.fromisoformat(v["reported_at"])
+            except ValueError:
+                continue
+            online = agent.last_seen_at is not None and agent.last_seen_at >= online_since
+            if online and reported < now - VEEAM_STALE:
+                hours = (now - reported).total_seconds() / 3600
+                await raise_problem(
+                    session, agent.device, "veeam.report_stale", Severity.WARNING,
+                    f"Dati Veeam non aggiornati da {hours:.0f} ore",
+                    details={"reported_at": reported.isoformat(), "agent_version": agent.version},
+                )
+                raised += 1
+            elif reported >= now - VEEAM_STALE:
+                await resolve_problem(session, agent.device_id, "veeam.report_stale")
+        await session.commit()
+    return raised
+
+
 QUEUE_TTL = timedelta(hours=1)
 RESULT_GRACE = timedelta(minutes=2)
 
@@ -79,6 +116,8 @@ async def main() -> None:
             n = await check_offline_agents()
             if n:
                 log.info("agenti offline: %d", n)
+            if k := await check_stale_veeam():
+                log.info("report Veeam fermi: %d", k)
             if m := await expire_commands():
                 log.info("comandi scaduti: %d", m)
         except Exception:

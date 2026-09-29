@@ -234,3 +234,34 @@ async def test_worker_expires_stale_commands(client):
         await s.commit()
     assert await expire_commands() == 1
     assert (await client.get(f"/api/v1/commands/{cmd_id}", headers=as_user())).json()["status"] == "expired"
+
+
+async def test_collector_failure_and_stale_report(client):
+    from app.db import SessionLocal
+    from app.models import Device
+    from app.worker import check_stale_veeam
+
+    data, auth = await approved_agent(client, roles=("veeam_vbr",))
+    ev = envelope({"events": [{"ts": datetime.now(UTC).isoformat(), "type": "collector.report_failed",
+                               "severity": "warning", "data": {"collector": "veeam_vbr", "error": "timeout"}}]})
+    await client.post("/agent/v1/events", json=ev, headers=auth)
+    [p] = (await client.get("/api/v1/problems", headers=as_user())).json()
+    assert p["check"] == "agent.collector" and p["details"]["error"] == "timeout"
+    assert p["title"] == "Raccolta dati Veeam B&R non riuscita"
+
+    # Il primo report riuscito chiude il problema.
+    await client.post("/agent/v1/veeam", headers=auth, json=veeam_report([job("a", "Success")]))
+    assert (await client.get("/api/v1/problems", headers=as_user())).json() == []
+
+    # Report fermo da 3 ore con agente online.
+    await client.post("/agent/v1/heartbeat", json={"version": "0.2.6"}, headers=auth)
+    async with SessionLocal() as s:
+        d = await s.get(Device, data["device_id"])
+        d.veeam = {**d.veeam, "reported_at": (datetime.now(UTC) - timedelta(hours=3)).isoformat()}
+        await s.commit()
+    assert await check_stale_veeam() == 1
+    [p] = (await client.get("/api/v1/problems", headers=as_user())).json()
+    assert p["check"] == "veeam.report_stale" and p["title"] == "Dati Veeam non aggiornati da 3 ore"
+    await client.post("/agent/v1/veeam", headers=auth, json=veeam_report([job("a", "Success")]))
+    assert await check_stale_veeam() == 0
+    assert (await client.get("/api/v1/problems", headers=as_user())).json() == []

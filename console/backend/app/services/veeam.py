@@ -82,6 +82,8 @@ async def ingest(session: AsyncSession, device: Device, p: VeeamPayload, ts: dat
     await evaluate_metrics(session, device, metrics)
 
     await _evaluate_license(session, device, p, now)
+    # Report arrivato: la raccolta funziona di nuovo.
+    await resolve_problem(session, device.id, "agent.collector", {"collector": f"veeam_{p.product}"})
     device.veeam = {
         "product": p.product,
         "version": p.version,
