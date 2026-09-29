@@ -33,14 +33,43 @@ function Find-Start($ev, $name) {
     return $null
 }
 
-# Full o incrementale, se Veeam lo scrive nel messaggio (dipende dalla versione).
-function Get-Mode($evs) {
-    foreach ($e in $evs) {
-        if (-not $e) { continue }
-        if ($e.Message -match '(?i)\b(active full|full backup|synthetic full)\b') { return 'full' }
-        if ($e.Message -match '(?i)\bincremental\b') { return 'incremental' }
-    }
-    return $null
+# File di backup citati nel log locale del job (C:\ProgramData\Veeam\Endpoint\<job>\Job.<job>.Backup.log):
+# il nome contiene data/ora di creazione e il tipo (.vbk = full, .vib = incrementale).
+# Così non serve accedere alla destinazione, spesso una share con credenziali di Veeam.
+$logRoot = Join-Path $env:ProgramData 'Veeam\Endpoint'
+$storageCache = @{}
+function Get-Storages($jobName) {
+    if ($storageCache.ContainsKey($jobName)) { return $storageCache[$jobName] }
+    $list = New-Object System.Collections.ArrayList
+    $seenFiles = @{}
+    $re = '(?i)' + [regex]::Escape($jobName) + '(\d{4}-\d{2}-\d{2}T\d{6})\.(vbk|vib)\b'
+    try {
+        $logs = @(Get-ChildItem $logRoot -Recurse -Filter 'Job.*.log' -ErrorAction Stop |
+            Where-Object { $_.Name -like "*$jobName*" -and $_.LastWriteTime -ge $historyCut.AddDays(-1) })
+        foreach ($m in @($logs | Select-String -Pattern $re -AllMatches)) {
+            foreach ($x in $m.Matches) {
+                $key = $x.Value.ToLowerInvariant()
+                if ($seenFiles.ContainsKey($key)) { continue }
+                $seenFiles[$key] = $true
+                try {
+                    $t = [datetime]::ParseExact($x.Groups[1].Value, 'yyyy-MM-ddTHHmmss', [Globalization.CultureInfo]::InvariantCulture)
+                    [void]$list.Add(@{ time = $t; full = ($x.Groups[2].Value -ieq 'vbk') })
+                } catch {}
+            }
+        }
+    } catch {}
+    $storageCache[$jobName] = $list
+    return $list
+}
+
+# Full o incrementale: il file creato durante la sessione (tra avvio e fine).
+function Get-Mode($jobName, $ev, $st) {
+    $to = $ev.TimeCreated.AddMinutes(1)
+    $from = $(if ($st) { $st.TimeCreated.AddMinutes(-1) } else { $ev.TimeCreated.AddHours(-12) })
+    $found = @(Get-Storages $jobName | Where-Object { $_.time -ge $from -and $_.time -le $to })
+    if ($found.Count -eq 0) { return $null }
+    if (@($found | Where-Object { $_.full }).Count -gt 0) { return 'full' }
+    return 'incremental'
 }
 
 function Get-Result($ev) {
@@ -87,7 +116,7 @@ foreach ($ev in ($events | Sort-Object TimeCreated -Descending)) {
     $entry = [ordered]@{
         start = $(if ($st) { ConvertTo-IsoDate $st.TimeCreated } else { $null })
         end = ConvertTo-IsoDate $ev.TimeCreated
-        mode = Get-Mode @($ev, $st)
+        mode = Get-Mode $name $ev $st
         result = Get-Result $ev
         state = 'Stopped'
         retry = $retry
