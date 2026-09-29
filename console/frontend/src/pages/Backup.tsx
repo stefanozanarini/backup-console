@@ -5,7 +5,7 @@ import { Empty, ErrorBox } from "../components";
 import { useConsole } from "../context";
 import { ago, bytes, dateTime } from "../format";
 import type { VeeamJob } from "../types";
-import { VeeamResultBadge, VeeamRunningBadge } from "../veeam";
+import { HistoryStrip, VeeamResultBadge, VeeamRunningBadge } from "../veeam";
 
 type Bucket = "success" | "warning" | "failed" | "none";
 
@@ -73,7 +73,7 @@ export default function Backup() {
       <div className="table-wrap">
         <table>
           <thead>
-            <tr><th>Esito</th><th>Job</th><th>Dispositivo</th><th>Tenant</th><th>Ultimo avvio</th><th>Ultimo successo</th><th className="num">Trasferiti</th></tr>
+            <tr><th>Esito</th><th>Job</th><th>Dispositivo</th><th>Tenant</th><th>Ultimi 10 giorni</th><th>Ultimo avvio</th><th>Ultimo successo</th><th className="num">Trasferiti</th></tr>
           </thead>
           <tbody>
             {rows.map((j) => (
@@ -82,6 +82,7 @@ export default function Backup() {
                 <td>{j.name} <span className="chip">{j.product === "vbr" ? "B&R" : "Agent"}</span></td>
                 <td className="nowrap"><Link to={`/dispositivi/${j.device_id}`}>{j.device_name}</Link></td>
                 <td className="nowrap">{j.tenant_name}</td>
+                <td><HistoryStrip job={j} /></td>
                 <td className="nowrap" title={dateTime(j.last_start ?? j.last_end)}>{ago(j.last_start ?? j.last_end)}</td>
                 <td className="nowrap muted" title={dateTime(j.last_success)}>{ago(j.last_success)}</td>
                 <td className="num">{j.transferred_bytes != null ? bytes(j.transferred_bytes) : "—"}</td>

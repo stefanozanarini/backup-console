@@ -16,6 +16,7 @@ $jobs = New-Object System.Collections.ArrayList
 $seen = @{}
 
 $recentCut = (Get-Date).AddHours(-24)
+$historyCut = (Get-Date).AddDays(-10)
 $maxMessages = 30
 
 function Limit-Text($s, [int]$max = 1000) {
@@ -146,6 +147,28 @@ function Get-RecentSessions($sessions) {
     return ,$out
 }
 
+# Storico degli ultimi 10 giorni per la console (al più 150 sessioni, dalla più recente).
+function Get-History($sessions) {
+    $out = New-Object System.Collections.ArrayList
+    foreach ($s in $sessions) {
+        $t = [datetime](Get-Prop $s @('CreationTime'))
+        if ($t -lt $historyCut) { break }  # $sessions è ordinato dalla più recente
+        $reason = $null
+        try { $reason = $s.Info.Reason } catch {}
+        [void]$out.Add([ordered]@{
+            start = ConvertTo-IsoDate $t
+            end = ConvertTo-IsoDate (Get-Prop $s @('EndTime'))
+            result = Get-Result $s
+            state = [string](Get-Prop $s @('State'))
+            retry = [bool](Test-RetrySession $s)
+            transferred_bytes = Get-Transferred $s
+            reason = $(if ($reason) { Limit-Text $reason 300 } else { $null })
+        })
+        if ($out.Count -ge 150) { break }
+    }
+    return ,$out
+}
+
 # Un job è descritto da tre sessioni diverse:
 #   - l'ultima avviata (può essere ancora in corso: esito "None" finché non termina);
 #   - l'ultima terminata, che dà l'esito, la fine e i messaggi;
@@ -176,6 +199,7 @@ function Add-Job($id, $name, $type, $enabled, $session, $next, $details) {
     }
     $recent = Get-RecentSessions $sessions
     $details.sessions_24h = $recent
+    $details.history = Get-History $sessions
     $details.retries_24h = @($recent | Where-Object { $_.retry }).Count
     [void]$jobs.Add([ordered]@{
         id = [string]$id

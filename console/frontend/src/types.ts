@@ -119,6 +119,16 @@ export interface DeviceDetail extends Device {
 
 export type VeeamResult = "Success" | "Warning" | "Failed" | "None" | string;
 
+export interface VeeamSession {
+  start: string | null;
+  end: string | null;
+  result: string | null;
+  state?: string | null;
+  retry?: boolean;
+  transferred_bytes?: number | null;
+  reason?: string | null;
+}
+
 export interface VeeamJob {
   id: string;
   tenant_id: string;
@@ -135,7 +145,10 @@ export interface VeeamJob {
   transferred_bytes: number | null;
   next_run: string | null;
   updated_at: string;
-  details?: { running?: boolean; running_since?: string | null; progress_pct?: number | null; retries_24h?: number };
+  details?: {
+    running?: boolean; running_since?: string | null; progress_pct?: number | null; retries_24h?: number;
+    history?: VeeamSession[];
+  };
   device_name: string;
   tenant_name: string;
 }

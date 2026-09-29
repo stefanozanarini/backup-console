@@ -289,3 +289,13 @@ tbody tr.detail-row:hover > td { background: var(--surface-2); }
 .problem-details .kv dd { margin: 0; overflow-wrap: anywhere; }
 .muted { color: var(--text-3); }
 .small { font-size: 12px; }
+
+/* --- storico backup ------------------------------------------------------ */
+.history-strip { display: inline-flex; gap: 3px; vertical-align: middle; }
+.hday { width: 12px; height: 18px; border-radius: 3px; background: var(--surface-2); border: 1px solid var(--border); }
+.hday.success { background: var(--good); border-color: var(--good); }
+.hday.warning { background: var(--warning); border-color: var(--warning); }
+.hday.failed { background: var(--critical); border-color: var(--critical); }
+.hday.none { background: var(--neutral-bg); border-color: var(--text-3); }
+tr.detail-row table.compact { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; margin-top: 4px; }
+tr.detail-row table.compact td, tr.detail-row table.compact th { padding: 5px 10px; font-size: 12.5px; }
