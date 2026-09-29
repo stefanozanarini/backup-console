@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     agent_offline_after_s: int = 300
     worker_interval_s: int = 60
 
+    # Fuso orario delle finestre di backup (gli orari sono quelli locali dei PC).
+    default_timezone: str = "Europe/Rome"
+
     # Retention dei dati (giorni). 0 = conserva per sempre.
     retention_metrics_raw_days: int = 90  # dopo: un valore medio all'ora
     retention_metrics_days: int = 730

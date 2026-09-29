@@ -4,7 +4,7 @@ from typing import Any
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 
 from app.models import Role
 
@@ -301,3 +301,43 @@ class VeeamLicenseRow(BaseModel):
     instances_used: int | None = None
     sockets_total: int | None = None
     sockets_used: int | None = None
+
+
+# --- finestra di backup dei PC ----------------------------------------------
+
+
+class WindowPoint(BaseModel):
+    day: int = Field(ge=1, le=7)  # 1 = lunedì … 7 = domenica
+    time: str = Field(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+
+
+class WindowInterval(BaseModel):
+    start: WindowPoint
+    end: WindowPoint
+
+    @model_validator(mode="after")
+    def _not_empty(self):
+        if self.start == self.end:
+            raise ValueError("inizio e fine coincidono")
+        return self
+
+
+class BackupWindowIn(BaseModel):
+    enabled: bool = True
+    intervals: list[WindowInterval] = Field(default=[], max_length=10)
+
+    @model_validator(mode="after")
+    def _intervals(self):
+        if self.enabled and not self.intervals:
+            raise ValueError("indica almeno un intervallo")
+        return self
+
+
+class BackupWindowState(BaseModel):
+    tenant: BackupWindowIn | None
+    device: BackupWindowIn | None = None
+    effective: BackupWindowIn | None
+    source: Literal["device", "tenant", "none"]
+    applies: bool = True
+    active: bool
+    until: datetime | None

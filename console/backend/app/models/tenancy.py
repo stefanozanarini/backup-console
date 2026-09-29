@@ -22,6 +22,8 @@ class Tenant(UUIDPk, Base):
     name: Mapped[str] = mapped_column(String(200), unique=True)
     slug: Mapped[str] = mapped_column(String(64), unique=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    # Finestra di backup predefinita per i PC del tenant (vedi services/backup_window).
+    backup_window: Mapped[dict[str, Any] | None] = mapped_column(nullable=True)
 
     sites: Mapped[list["Site"]] = relationship(back_populates="tenant")
 

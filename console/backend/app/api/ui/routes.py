@@ -4,7 +4,7 @@ from datetime import timedelta
 from typing import Any
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 from sqlalchemy import case, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,6 +32,8 @@ from app.models import (
 )
 from app.models.base import utcnow
 from app.schemas.ui import (
+    BackupWindowIn,
+    BackupWindowState,
     DeviceDetail,
     DeviceOut,
     MeOut,
@@ -47,6 +49,7 @@ from app.schemas.ui import (
     TokenOut,
     UserCreate,
 )
+from app.services import backup_window
 from app.services.audit import audit
 
 router = APIRouter(prefix="/api/v1", tags=["console"])
@@ -370,3 +373,80 @@ async def problems_summary(user: CurrentUserDep, session: SessionDep):
         row = out.setdefault(str(tid), {"tenant_id": tid, "tenant_name": name, "warning": 0, "critical": 0})
         row[sev] = n
     return sorted(out.values(), key=lambda r: (-r["critical"], -r["warning"], r["tenant_name"]))
+
+
+# --- finestra di backup dei PC ------------------------------------------------
+
+
+def _window(v: dict | None) -> BackupWindowIn | None:
+    return BackupWindowIn.model_validate(v) if v else None
+
+
+def _window_state(tenant: Tenant, device: Device | None = None) -> BackupWindowState:
+    now = utcnow()
+    if device is None:
+        eff = tenant.backup_window if tenant.backup_window and tenant.backup_window.get("enabled", True) else None
+        source = "tenant" if tenant.backup_window is not None else "none"
+        applies = True
+    else:
+        eff, source = backup_window.effective(device, tenant)
+        applies = backup_window.applies(device)
+    active, until = backup_window.active_at(eff, now) if applies else (False, None)
+    return BackupWindowState(
+        tenant=_window(tenant.backup_window), device=_window(device.backup_window) if device else None,
+        effective=_window(eff), source=source, applies=applies, active=active, until=until,
+    )
+
+
+@router.get("/tenants/{tenant_id}/backup-window", response_model=BackupWindowState)
+async def get_tenant_window(tenant_id: uuid.UUID, user: CurrentUserDep, session: SessionDep):
+    user.require_read(tenant_id)
+    tenant = await session.get(Tenant, tenant_id)
+    if tenant is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "non trovato")
+    return _window_state(tenant)
+
+
+@router.put("/tenants/{tenant_id}/backup-window", response_model=BackupWindowState)
+async def set_tenant_window(
+    tenant_id: uuid.UUID, user: CurrentUserDep, session: SessionDep, request: Request,
+    body: Annotated[BackupWindowIn | None, Body()] = None,
+):
+    """body = null: nessuna finestra per i PC del tenant (salvo quelli con un'impostazione propria)."""
+    user.require_write(tenant_id)
+    tenant = await session.get(Tenant, tenant_id)
+    if tenant is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "non trovato")
+    tenant.backup_window = body.model_dump() if body else None
+    audit(session, "backup_window.tenant", user_id=user.id, tenant_id=tenant_id, target=tenant.slug,
+          ip=client_ip(request), window=tenant.backup_window)
+    await session.commit()
+    return _window_state(tenant)
+
+
+@router.get("/devices/{device_id}/backup-window", response_model=BackupWindowState)
+async def get_device_window(device_id: uuid.UUID, user: CurrentUserDep, session: SessionDep):
+    device = await session.get(Device, device_id)
+    if device is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "non trovato")
+    user.require_read(device.tenant_id)
+    return _window_state(await session.get(Tenant, device.tenant_id), device)
+
+
+@router.put("/devices/{device_id}/backup-window", response_model=BackupWindowState)
+async def set_device_window(
+    device_id: uuid.UUID, user: CurrentUserDep, session: SessionDep, request: Request,
+    body: Annotated[BackupWindowIn | None, Body()] = None,
+):
+    """body = null: il PC eredita la finestra del tenant; {"enabled": false}: nessuna finestra."""
+    device = await session.get(Device, device_id)
+    if device is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "non trovato")
+    user.require_write(device.tenant_id)
+    if body is not None and not backup_window.applies(device):
+        raise HTTPException(status.HTTP_409_CONFLICT, "la finestra di backup vale solo per i PC Windows con Veeam Agent")
+    device.backup_window = body.model_dump() if body else None
+    audit(session, "backup_window.device", user_id=user.id, tenant_id=device.tenant_id, target=device.name,
+          ip=client_ip(request), window=device.backup_window)
+    await session.commit()
+    return _window_state(await session.get(Tenant, device.tenant_id), device)

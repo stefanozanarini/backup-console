@@ -9,9 +9,9 @@ from sqlalchemy.orm import selectinload
 
 from app.config import settings
 from app.db import SessionLocal
-from app.models import Agent, AgentStatus, Command, CommandStatus, DeviceKind, Severity
+from app.models import Agent, AgentStatus, Command, CommandStatus, DeviceKind, Severity, Tenant
 from app.models.base import utcnow
-from app.services import retention
+from app.services import backup_window, retention
 from app.services.problems import raise_problem, resolve_problem
 
 log = logging.getLogger("bc.worker")
@@ -81,6 +81,43 @@ async def check_stale_veeam() -> int:
     return raised
 
 
+GIORNI = ("lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato", "domenica")
+
+
+async def check_backup_windows() -> int:
+    """PC con finestra di backup attiva ma agente non in linea: probabilmente spento,
+    quindi il backup non partirà. Si chiude quando il PC torna in linea o finisce la finestra."""
+    now = utcnow()
+    online_since = now - timedelta(seconds=settings.agent_offline_after_s)
+    raised = 0
+    async with SessionLocal() as session:
+        agents = (
+            await session.scalars(
+                select(Agent).where(Agent.status == AgentStatus.APPROVED).options(selectinload(Agent.device))
+            )
+        ).all()
+        tenants = {t.id: t for t in await session.scalars(select(Tenant))}
+        for agent in agents:
+            device = agent.device
+            if not backup_window.applies(device):
+                continue
+            w, _ = backup_window.effective(device, tenants.get(device.tenant_id))
+            active, until = backup_window.active_at(w, now)
+            online = agent.last_seen_at is not None and agent.last_seen_at >= online_since
+            if active and not online:
+                await raise_problem(
+                    session, device, "pc.off_in_window", Severity.WARNING,
+                    f"PC spento durante la finestra di backup (fino a {GIORNI[until.weekday()]} {until:%H:%M})",
+                    details={"last_seen_at": agent.last_seen_at.isoformat() if agent.last_seen_at else None,
+                             "until": until.isoformat()},
+                )
+                raised += 1
+            else:
+                await resolve_problem(session, device.id, "pc.off_in_window")
+        await session.commit()
+    return raised
+
+
 QUEUE_TTL = timedelta(hours=1)
 RESULT_GRACE = timedelta(minutes=2)
 
@@ -118,6 +155,8 @@ async def main() -> None:
             n = await check_offline_agents()
             if n:
                 log.info("agenti offline: %d", n)
+            if w := await check_backup_windows():
+                log.info("PC spenti in finestra di backup: %d", w)
             if k := await check_stale_veeam():
                 log.info("report Veeam fermi: %d", k)
             if m := await expire_commands():

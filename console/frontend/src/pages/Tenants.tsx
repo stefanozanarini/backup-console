@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { api, useApi } from "../api";
+import { TenantBackupWindow } from "../BackupWindow";
 import { CopyButton, ErrorBox } from "../components";
 import { useConsole } from "../context";
 import { dateTime } from "../format";
@@ -78,6 +79,7 @@ function TenantCard({ tenant }: { tenant: Tenant }) {
       <h2>{tenant.name} <span className="chip mono">{tenant.slug}</span></h2>
       <ErrorBox error={sites.error ?? error} />
       {(sites.data ?? []).map((s) => <SiteRow key={s.id} site={s} writable={writable} />)}
+      <TenantBackupWindow tenantId={tenant.id} writable={writable} />
       {sites.data?.length === 0 && <div className="muted" style={{ marginBottom: 12 }}>Nessun sito.</div>}
       {writable && (
         <form className="form-row" onSubmit={createSite} style={{ marginTop: 12 }}>

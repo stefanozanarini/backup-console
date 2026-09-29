@@ -38,6 +38,8 @@ class Device(UUIDPk, Base):
     os_version: Mapped[str | None] = mapped_column(String(200))
     # ID di Supremo (assistenza remota) letto dal registro dall'agente, se installato.
     supremo_id: Mapped[str | None] = mapped_column(String(32))
+    # Finestra di backup del PC: None = eredita dal tenant; {"enabled": false} = nessuna.
+    backup_window: Mapped[dict[str, Any] | None] = mapped_column(nullable=True)
     # Ultimo report Veeam: prodotto, versione, repository, licenza (i job sono in veeam_jobs).
     veeam: Mapped[dict[str, Any]] = mapped_column(default=dict)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)

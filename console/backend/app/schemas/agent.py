@@ -44,6 +44,8 @@ class HeartbeatResponse(BaseModel):
     # Placeholder per le fasi successive (config remota, aggiornamenti).
     config_version: int = 0
     desired_version: str | None = None
+    # Finestra di backup effettiva (solo PC Windows con Veeam Agent).
+    backup_window: dict[str, Any] | None = None
 
 
 class Envelope[T](BaseModel):

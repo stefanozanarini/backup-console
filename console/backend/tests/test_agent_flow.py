@@ -22,12 +22,12 @@ async def setup_site(client, slug="acme"):
     return tenant_id, r.json()["id"]
 
 
-async def enroll(client, site_id, roles=("qnap",)):
+async def enroll(client, site_id, roles=("qnap",), platform="linux"):
     r = await client.post(f"/api/v1/sites/{site_id}/enrollment-tokens", json={}, headers=as_user())
     assert r.status_code == 201, r.text
     token = r.json()["token"]
     body = {
-        "token": token, "csr_pem": make_csr(), "hostname": "nas01", "platform": "linux",
+        "token": token, "csr_pem": make_csr(), "hostname": "nas01", "platform": platform,
         "arch": "amd64", "agent_version": "0.1.0", "roles": list(roles),
     }
     r = await client.post("/agent/v1/enroll", json=body)

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"time"
+	"unsafe"
 
 	"fyne.io/systray"
 	"golang.org/x/sys/windows"
@@ -50,8 +51,10 @@ func Run() error {
 
 type menu struct {
 	title, state, contact, exec *systray.MenuItem
+	window                      *systray.MenuItem
 	open, quit                  *systray.MenuItem
 	server                      string
+	notified                    time.Time // fine della finestra già segnalata all'utente
 }
 
 func onReady(mutex windows.Handle) {
@@ -63,7 +66,9 @@ func onReady(mutex windows.Handle) {
 		contact: systray.AddMenuItem("Ultimo contatto: —", ""),
 		exec:    systray.AddMenuItem("Esecuzione remota: —", ""),
 	}
-	for _, it := range []*systray.MenuItem{m.title, m.state, m.contact, m.exec} {
+	m.window = systray.AddMenuItem("", "")
+	m.window.Hide()
+	for _, it := range []*systray.MenuItem{m.title, m.state, m.contact, m.exec, m.window} {
 		it.Disable()
 	}
 	systray.AddSeparator()
@@ -114,6 +119,8 @@ func (m *menu) refresh(mutex windows.Handle) {
 		}
 	}
 
+	m.showWindow(st.BackupWindowUntil)
+
 	switch st.State {
 	case "approved":
 		m.show(true, "Stato: connesso alla console", contactLine(st), execLine(st))
@@ -144,6 +151,47 @@ func (m *menu) show(ok bool, state, contact, exec string) {
 	if exec != "" {
 		m.exec.SetTitle(exec)
 	}
+}
+
+// showWindow: durante la finestra di backup una riga nel menu, il suggerimento sull'icona
+// e, una volta per finestra, un avviso. È solo informativo: l'utente può spegnere.
+func (m *menu) showWindow(until *time.Time) {
+	if until == nil {
+		m.window.Hide()
+		return
+	}
+	text := "Backup programmato fino a " + windowEnd(*until) + ": se possibile lascia acceso il PC"
+	m.window.SetTitle(text)
+	m.window.Show()
+	if !m.notified.Equal(*until) {
+		m.notified = *until
+		go notify("Backup Console Agent", text+".\n\nIl PC non andrà in sospensione da solo durante questo periodo.")
+	}
+}
+
+var giorni = [...]string{"domenica", "lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato"}
+
+func windowEnd(t time.Time) string {
+	t = t.Local()
+	return fmt.Sprintf("%s %s", giorni[t.Weekday()], t.Format("15:04"))
+}
+
+var (
+	user32          = windows.NewLazySystemDLL("user32.dll")
+	procMessageBoxW = user32.NewProc("MessageBoxW")
+)
+
+const (
+	mbIconInformation = 0x40
+	mbSetForeground   = 0x10000
+	mbTopMost         = 0x40000
+)
+
+// notify mostra un avviso con il solo pulsante OK (non blocca l'icona: gira a parte).
+func notify(title, text string) {
+	t, _ := windows.UTF16PtrFromString(title)
+	x, _ := windows.UTF16PtrFromString(text)
+	procMessageBoxW.Call(0, uintptr(unsafe.Pointer(x)), uintptr(unsafe.Pointer(t)), mbIconInformation|mbSetForeground|mbTopMost)
 }
 
 func contactLine(st status.Status) string {

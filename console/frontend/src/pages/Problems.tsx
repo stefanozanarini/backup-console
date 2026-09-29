@@ -141,7 +141,7 @@ const DETAIL_LABELS: Record<string, string> = {
   expiration: "Scadenza", value: "Valore", warn: "Soglia attenzione", crit: "Soglia critica",
   retries: "Retry", repo: "Repository", mount: "Volume", disk: "Disco",
   error: "Errore", collector: "Raccolta", at: "Quando", reported_at: "Ultimo report ricevuto",
-  agent_version: "Versione agente", last_seen_at: "Ultimo contatto",
+  agent_version: "Versione agente", last_seen_at: "Ultimo contatto", until: "Fine della finestra",
 };
 const HIDDEN = new Set(["messages", "sessions"]);
 

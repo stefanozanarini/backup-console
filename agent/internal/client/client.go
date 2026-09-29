@@ -2,6 +2,8 @@
 package client
 
 import (
+	"backupconsole/agent/internal/window"
+
 	"bytes"
 	"context"
 	"crypto/rand"
@@ -196,6 +198,8 @@ type HeartbeatResponse struct {
 	ServerTime     time.Time `json:"server_time"`
 	ConfigVersion  int       `json:"config_version"`
 	DesiredVersion *string   `json:"desired_version"`
+	// Finestra di backup effettiva (solo PC con Veeam Agent); nil = nessuna.
+	BackupWindow *window.Window `json:"backup_window"`
 }
 
 type Command struct {

@@ -7,6 +7,7 @@ import { AGENT_STATUS_LABEL, ago, bytes, connectivity, dateTime, KIND_LABEL } fr
 import CommandPanel from "../CommandPanel";
 import LineChart, { type Series } from "../LineChart";
 import type { DeviceDetail, MetricSeries, Problem, Release } from "../types";
+import { DeviceBackupWindow } from "../BackupWindow";
 import { VeeamSection } from "../veeam";
 import VeeamCleanup from "../VeeamCleanup";
 
@@ -144,6 +145,7 @@ export default function DeviceDetailPage() {
       </section>
 
       <VeeamSection device={d} />
+      <DeviceBackupWindow deviceId={d.id} writable={writable} />
       <VeeamCleanup device={d} writable={writable} />
 
       <section className="card">

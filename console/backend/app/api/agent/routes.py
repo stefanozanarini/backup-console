@@ -30,6 +30,7 @@ from app.models import (
     InventorySnapshot,
     Metric,
     Release,
+    Tenant,
     token_usable,
 )
 from app.models.base import utcnow
@@ -50,6 +51,7 @@ from app.schemas.agent import (
 )
 from app.services.audit import audit
 from app.services.ca import CSRError
+from app.services import backup_window
 from app.services import veeam as veeam_service
 from app.services.problems import evaluate_metrics, raise_problem, resolve_problem
 from app.services.releases import asset_path, download_name
@@ -174,8 +176,11 @@ async def heartbeat(body: HeartbeatRequest, request: Request, agent: AgentDep, s
     if agent.status == AgentStatus.APPROVED:
         await resolve_problem(session, agent.device_id, "agent.offline")
         await _complete_upgrades(session, agent)
+    window = None
+    if agent.status == AgentStatus.APPROVED:
+        window = backup_window.for_agent(agent.device, await session.get(Tenant, agent.device.tenant_id))
     await session.commit()
-    return HeartbeatResponse(status=agent.status, server_time=now)
+    return HeartbeatResponse(status=agent.status, server_time=now, backup_window=window)
 
 
 async def _complete_upgrades(session: AsyncSession, agent: Agent) -> None:

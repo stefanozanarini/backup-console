@@ -92,12 +92,14 @@ type Agent struct {
 	restartOnce sync.Once
 	restart     chan struct{}
 	execSlots   chan struct{}
+	window      *backupWindow
 }
 
 func New(cfg *config.Config, c *client.Client) *Agent {
 	return &Agent{
 		cfg: cfg, client: c, collectors: Detect(), started: time.Now(),
 		restart: make(chan struct{}), execSlots: make(chan struct{}, 2),
+		window: newBackupWindow(cfg.DataDir),
 	}
 }
 
@@ -115,10 +117,14 @@ func (a *Agent) Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var wg sync.WaitGroup
-	wg.Add(1)
+	wg.Add(2)
 	go func() {
 		defer wg.Done()
 		a.commandLoop(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		a.window.loop(ctx)
 	}()
 
 	hb := time.NewTicker(time.Duration(a.cfg.HeartbeatSec) * time.Second)
@@ -222,6 +228,8 @@ func (a *Agent) heartbeat(ctx context.Context) {
 		return
 	}
 	a.lastOK = time.Now()
+	a.window.set(resp.BackupWindow)
+	a.window.tick(time.Now())
 	a.writeStatus(resp.Status, nil)
 	if resp.Status != a.status {
 		log.Printf("stato agente: %s", resp.Status)
@@ -240,6 +248,9 @@ func (a *Agent) writeStatus(state string, err error) {
 	st := status.Status{
 		Version: version.Version, State: state, Server: a.cfg.ServerURL, Device: host,
 		RemoteExec: a.cfg.RemoteExecAllowed(), LastContact: a.lastOK, UpdatedAt: time.Now(),
+	}
+	if active, until := a.window.state(); active {
+		st.BackupWindowUntil = &until
 	}
 	if err != nil {
 		st.LastError = err.Error()
