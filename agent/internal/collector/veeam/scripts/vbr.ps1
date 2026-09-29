@@ -86,30 +86,49 @@ function Test-RetrySession($s) {
     return ([string](Get-Prop $s @('Name', 'JobName'))) -match '\(Retry'
 }
 
-# Storico delle sessioni di un job, dalla più recente. Prima l'API interna per job; se
-# non esiste in questa versione, una sola lettura di tutte le sessioni per l'intero report.
-$script:allSessions = $null
+# Storico delle sessioni di un job (ultimi 10 giorni), dalla più recente. Solo l'API
+# per job: niente Get-VBRBackupSession senza filtri, che su server con anni di storico
+# carica tutte le sessioni e fa scadere il report. Tempo massimo complessivo: oltre,
+# per i job rimanenti si usa solo l'ultima sessione.
+$historyBudget = [Diagnostics.Stopwatch]::StartNew()
+$historyBudgetSec = 180
+$script:historySkipped = $false
 function Get-JobSessions($jobId, $known) {
-    $list = $null
-    try { $list = @([Veeam.Backup.Core.CBackupSession]::GetByJob([guid]$jobId)) } catch {}
-    if ($null -eq $list) {
-        if ($null -eq $script:allSessions) {
-            $script:allSessions = @{}
-            try {
-                foreach ($s in @(Get-VBRBackupSession)) {
-                    $k = [string]$s.JobId
-                    if (-not $script:allSessions.ContainsKey($k)) { $script:allSessions[$k] = New-Object System.Collections.ArrayList }
-                    [void]$script:allSessions[$k].Add($s)
-                }
-            } catch { Add-CollectorError 'Get-VBRBackupSession' $_ }
+    $known = @($known | Where-Object { $_ })
+    if ($historyBudget.Elapsed.TotalSeconds -gt $historyBudgetSec) {
+        if (-not $script:historySkipped) {
+            $script:historySkipped = $true
+            [void]$script:errors.Add("storico sessioni: tempo esaurito dopo $historyBudgetSec s, per gli altri job solo l'ultima sessione")
         }
-        $list = @()
-        if ($script:allSessions.ContainsKey([string]$jobId)) { $list = @($script:allSessions[[string]$jobId]) }
+        return @($known | Sort-Object { [datetime](Get-Prop $_ @('CreationTime')) } -Descending)
     }
+    $all = $null
+    try { $all = @([Veeam.Backup.Core.CBackupSession]::GetByJob([guid]$jobId)) } catch {}
+    if ($null -eq $all) { return @($known | Sort-Object { [datetime](Get-Prop $_ @('CreationTime')) } -Descending) }
+    # Filtro subito: ordinare migliaia di sessioni è la parte lenta.
+    $list = New-Object System.Collections.ArrayList
     $ids = @{}
-    foreach ($s in $list) { if ($s) { $ids[[string]$s.Id] = $true } }
-    foreach ($s in @($known)) { if ($s -and -not $ids.ContainsKey([string]$s.Id)) { $list += $s } }
-    return @($list | Where-Object { $_ } | Sort-Object { [datetime](Get-Prop $_ @('CreationTime')) } -Descending)
+    foreach ($s in $all) {
+        if (-not $s) { continue }
+        $t = Get-Prop $s @('CreationTime')
+        if ($t -and [datetime]$t -ge $historyCut) { [void]$list.Add($s); $ids[[string]$s.Id] = $true }
+    }
+    foreach ($s in $known) { if (-not $ids.ContainsKey([string]$s.Id)) { [void]$list.Add($s) } }
+    # Per l'ultimo esito/successo oltre i 10 giorni: la più recente terminata e la più
+    # recente riuscita, cercate con una sola passata.
+    if (@($list | Where-Object { (Get-Result $_) -match 'Success|Warning' }).Count -eq 0) {
+        $bestDone = $null; $bestOk = $null
+        foreach ($s in $all) {
+            if (-not $s) { continue }
+            $r = Get-Result $s
+            if ($r -notmatch 'Success|Warning|Failed') { continue }
+            $t = [datetime](Get-Prop $s @('CreationTime'))
+            if (-not $bestDone -or $t -gt [datetime]$bestDone.CreationTime) { $bestDone = $s }
+            if ($r -match 'Success|Warning' -and (-not $bestOk -or $t -gt [datetime]$bestOk.CreationTime)) { $bestOk = $s }
+        }
+        foreach ($s in @($bestDone, $bestOk)) { if ($s -and -not $ids.ContainsKey([string]$s.Id)) { [void]$list.Add($s); $ids[[string]$s.Id] = $true } }
+    }
+    return @($list | Sort-Object { [datetime](Get-Prop $_ @('CreationTime')) } -Descending)
 }
 
 function Get-Result($s) { return [string](Get-Prop $s @('Result')) }
@@ -160,10 +179,11 @@ function Get-History($sessions) {
     $out = New-Object System.Collections.ArrayList
     foreach ($s in $sessions) {
         $t = [datetime](Get-Prop $s @('CreationTime'))
-        if ($t -lt $historyCut) { break }  # $sessions è ordinato dalla più recente
+        if ($t -lt $historyCut) { continue }  # sessioni più vecchie aggiunte solo per esito/successo
         $reason = $null
         try { $reason = $s.Info.Reason } catch {}
         [void]$out.Add([ordered]@{
+            id = [string]$s.Id
             start = ConvertTo-IsoDate $t
             end = ConvertTo-IsoDate (Get-Prop $s @('EndTime'))
             result = Get-Result $s
