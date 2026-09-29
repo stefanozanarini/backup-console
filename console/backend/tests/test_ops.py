@@ -176,6 +176,32 @@ async def test_veeam_ingest_and_problems(client):
     assert device["veeam"]["version"] == "12.3.1.1139"
 
 
+async def test_veeam_messages_and_retries(client):
+    _, auth = await approved_agent(client, roles=("veeam_vbr",))
+    warn = job("w", "Warning")
+    warn["details"] = {"messages": [
+        {"object": "SQL01", "status": "warning", "text": "Unable to truncate Microsoft SQL Server transaction logs."},
+        {"object": None, "status": "info", "text": ""},  # scartato: senza testo
+    ]}
+    retried = job("r", "Success")
+    retried["details"] = {"retries_24h": 1, "sessions_24h": [
+        {"start": "2026-09-28T20:00:00Z", "result": "Failed", "retry": False, "reason": "Connection lost"},
+        {"start": "2026-09-28T20:15:00Z", "result": "Success", "retry": True, "reason": None},
+    ]}
+    await client.post("/agent/v1/veeam", headers=auth, json=veeam_report([warn, retried]))
+    problems = {p["check"]: p for p in (await client.get("/api/v1/problems", headers=as_user())).json()}
+    assert set(problems) == {"veeam.job_result", "veeam.job_retry"}
+    assert problems["veeam.job_result"]["details"]["messages"] == [warn["details"]["messages"][0]]
+    r = problems["veeam.job_retry"]
+    assert r["severity"] == "warning" and r["title"] == "Job Job r: 1 retry nelle ultime 24 ore"
+    assert [s["result"] for s in r["details"]["sessions"]] == ["Failed", "Success"]
+
+    # Niente più retry nelle ultime 24 ore: il problema si chiude.
+    retried["details"] = {"retries_24h": 0, "sessions_24h": []}
+    await client.post("/agent/v1/veeam", headers=auth, json=veeam_report([job("w", "Success"), retried]))
+    assert (await client.get("/api/v1/problems", headers=as_user())).json() == []
+
+
 async def test_disabled_job_is_ignored(client):
     _, auth = await approved_agent(client, roles=("veeam_vbr",))
     await client.post("/agent/v1/veeam", headers=auth, json=veeam_report([job("x", "Failed", 500, enabled=False)]))

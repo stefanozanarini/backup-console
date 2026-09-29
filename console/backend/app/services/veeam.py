@@ -11,6 +11,20 @@ from app.schemas.agent import VeeamPayload
 from app.services.problems import evaluate_metrics, raise_problem, resolve_problem, thresholds_for
 
 RESULT_SEVERITY = {"failed": Severity.CRITICAL, "warning": Severity.WARNING}
+JOB_CHECKS = ("veeam.job_result", "veeam.last_success_age_h", "veeam.job_retry")
+MAX_MESSAGES = 30
+
+
+def _messages(job: VeeamJob) -> list[dict]:
+    """Avvisi/errori dell'ultima sessione, come li riporta l'agente (VBR: log dei task;
+    Veeam Agent: testo dell'evento)."""
+    d = job.details or {}
+    msgs = d.get("messages")
+    if isinstance(msgs, list):
+        return [m for m in msgs if isinstance(m, dict) and m.get("text")][:MAX_MESSAGES]
+    if d.get("message"):
+        return [{"object": None, "status": (job.last_result or "").lower() or None, "text": str(d["message"])}]
+    return []
 
 
 class _M:
@@ -48,7 +62,7 @@ async def ingest(session: AsyncSession, device: Device, p: VeeamPayload, ts: dat
     # Job eliminati in Veeam: rimuoviamo riga e problemi.
     for key, row in existing.items():
         if key not in seen:
-            for check in ("veeam.job_result", "veeam.last_success_age_h"):
+            for check in JOB_CHECKS:
                 await resolve_problem(session, device.id, check, {"job": key})
             await session.execute(delete(VeeamJob).where(VeeamJob.id == row.id))
 
@@ -81,8 +95,8 @@ async def ingest(session: AsyncSession, device: Device, p: VeeamPayload, ts: dat
 async def _evaluate_job(session: AsyncSession, device: Device, job: VeeamJob, now: datetime) -> None:
     labels = {"job": job.job_key}
     if not job.enabled:
-        await resolve_problem(session, device.id, "veeam.job_result", labels)
-        await resolve_problem(session, device.id, "veeam.last_success_age_h", labels)
+        for check in JOB_CHECKS:
+            await resolve_problem(session, device.id, check, labels)
         return
 
     severity = RESULT_SEVERITY.get((job.last_result or "").lower())
@@ -90,8 +104,22 @@ async def _evaluate_job(session: AsyncSession, device: Device, job: VeeamJob, no
         await resolve_problem(session, device.id, "veeam.job_result", labels)
     else:
         esito = "fallito" if severity == Severity.CRITICAL else "completato con avvisi"
-        details = {"job": job.name, "result": job.last_result, "last_end": job.last_end.isoformat() if job.last_end else None}
+        details = {"job": job.name, "result": job.last_result, "last_end": job.last_end.isoformat() if job.last_end else None,
+                   "messages": _messages(job)}
         await raise_problem(session, device, "veeam.job_result", severity, f"Job {job.name}: {esito}", labels, details)
+
+    # Retry nelle ultime 24 ore: segnale di un problema anche se il job alla fine riesce.
+    d = job.details or {}
+    retries = d.get("retries_24h")
+    if isinstance(retries, int) and retries > 0:
+        sessions = [s for s in d.get("sessions_24h") or [] if isinstance(s, dict)]
+        await raise_problem(
+            session, device, "veeam.job_retry", Severity.WARNING,
+            f"Job {job.name}: {retries} retry nelle ultime 24 ore", labels,
+            {"job": job.name, "retries": retries, "sessions": sessions[-20:]},
+        )
+    else:
+        await resolve_problem(session, device.id, "veeam.job_retry", labels)
 
     # Nessun backup riuscito di recente (anche se l'ultimo non è fallito: es. job che non parte più).
     limits = await thresholds_for(session, "veeam.last_success_age_h", device.tenant_id, device.id)

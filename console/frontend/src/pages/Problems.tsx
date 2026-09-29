@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, notifyChange, useApi } from "../api";
 import { Empty, ErrorBox, SeverityBadge, StateBadge } from "../components";
@@ -21,6 +21,7 @@ export default function Problems() {
   const severity = params.get("severity") ?? "";
   const state = (params.get("state") as StateFilter) || "active";
   const [busy, setBusy] = useState<string | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
   const [actionError, setActionError] = useState<Error | null>(null);
 
   const q = [STATE_FILTERS[state], tenant && `tenant_id=${tenant}`, severity && `severity=${severity}`]
@@ -112,11 +113,22 @@ export default function Problems() {
           </thead>
           <tbody>
             {(problems.data ?? []).map((p) => (
-              <tr key={p.id}>
+              <Fragment key={p.id}>
+              <tr
+                className={`clickable ${open === p.id ? "expanded" : ""}`}
+                onClick={(e) => {
+                  // I link e i pulsanti della riga mantengono il loro comportamento.
+                  if ((e.target as HTMLElement).closest("a, button")) return;
+                  setOpen(open === p.id ? null : p.id);
+                }}
+                aria-expanded={open === p.id}
+              >
                 <td><SeverityBadge severity={p.severity} /></td>
                 <td className="nowrap">{p.tenant_name}</td>
                 <td className="nowrap"><Link to={`/dispositivi/${p.device_id}`}>{p.device_name}</Link></td>
-                <td>{p.title}</td>
+                <td>
+                  <span className="chevron" aria-hidden="true">{open === p.id ? "▾" : "▸"}</span> {p.title}
+                </td>
                 <td className="nowrap" title={dateTime(p.first_seen)}>{ago(p.first_seen)}</td>
                 <td className="nowrap muted" title={dateTime(p.last_seen)}>{ago(p.last_seen)}</td>
                 <td><StateBadge state={p.state} /></td>
@@ -128,6 +140,12 @@ export default function Problems() {
                   )}
                 </td>
               </tr>
+              {open === p.id && (
+                <tr className="detail-row">
+                  <td colSpan={8}><ProblemDetails problem={p} /></td>
+                </tr>
+              )}
+              </Fragment>
             ))}
           </tbody>
         </table>
@@ -136,6 +154,79 @@ export default function Problems() {
         )}
       </div>
     </>
+  );
+}
+
+interface Message { object?: string | null; status?: string | null; text: string }
+interface SessionInfo { start?: string | null; end?: string | null; result?: string | null; retry?: boolean; reason?: string | null }
+
+const DETAIL_LABELS: Record<string, string> = {
+  job: "Job", result: "Esito", last_end: "Fine ultima sessione", last_success: "Ultimo backup riuscito",
+  expiration: "Scadenza", value: "Valore", warn: "Soglia attenzione", crit: "Soglia critica",
+  retries: "Retry", repo: "Repository", mount: "Volume", disk: "Disco",
+};
+const HIDDEN = new Set(["messages", "sessions"]);
+
+function ProblemDetails({ problem }: { problem: Problem }) {
+  const d = problem.details ?? {};
+  const messages = Array.isArray(d.messages) ? (d.messages as Message[]) : [];
+  const sessions = Array.isArray(d.sessions) ? (d.sessions as SessionInfo[]) : [];
+  const fields = Object.entries(d).filter(([k, v]) => !HIDDEN.has(k) && v !== null && v !== "" && typeof v !== "object");
+
+  return (
+    <div className="problem-details">
+      {messages.length > 0 && (
+        <ul className="messages">
+          {messages.map((m, i) => (
+            <li key={i} className={m.status ?? ""}>
+              <span className="msg-icon" aria-label={m.status ?? ""}>
+                {m.status === "error" ? "✖" : m.status === "warning" ? "⚠" : "•"}
+              </span>
+              <span>
+                {m.object && <strong>{m.object}: </strong>}
+                {m.text}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {sessions.length > 0 && (
+        <table className="compact">
+          <thead>
+            <tr><th>Avvio</th><th>Fine</th><th>Esito</th><th>Tipo</th><th>Motivo</th></tr>
+          </thead>
+          <tbody>
+            {sessions.map((s, i) => (
+              <tr key={i}>
+                <td className="nowrap">{s.start ? dateTime(s.start) : "—"}</td>
+                <td className="nowrap">{s.end ? dateTime(s.end) : "—"}</td>
+                <td>{s.result || "—"}</td>
+                <td>{s.retry ? "Retry" : "Esecuzione"}</td>
+                <td>{s.reason || ""}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {fields.length > 0 && (
+        <dl className="kv">
+          {fields.map(([k, v]) => (
+            <Fragment key={k}>
+              <dt>{DETAIL_LABELS[k] ?? k}</dt>
+              <dd>{typeof v === "string" && /^\d{4}-\d\d-\d\dT/.test(v) ? dateTime(v) : String(v)}</dd>
+            </Fragment>
+          ))}
+        </dl>
+      )}
+      {messages.length === 0 && sessions.length === 0 && problem.check === "veeam.job_result" && (
+        <div className="muted">
+          Nessun dettaglio disponibile: l'agente lo riporterà dalla prossima raccolta (serve la versione aggiornata).
+        </div>
+      )}
+      <div className="muted small">
+        Controllo <code>{problem.check}</code> · primo rilevamento {dateTime(problem.first_seen)}
+      </div>
+    </div>
   );
 }
 

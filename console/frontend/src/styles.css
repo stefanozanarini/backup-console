@@ -269,3 +269,23 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); width
 .login input[type="password"] { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; min-height: 32px; }
 .login-divider { display: flex; align-items: center; gap: 10px; color: var(--text-3); font-size: 12.5px; }
 .login-divider::before, .login-divider::after { content: ""; flex: 1; border-top: 1px solid var(--border); }
+
+/* --- dettaglio problema -------------------------------------------------- */
+tr.clickable { cursor: pointer; }
+tr.expanded td { background: var(--surface-2); border-bottom-color: transparent; }
+.chevron { color: var(--text-3); display: inline-block; width: 12px; }
+tr.detail-row > td { background: var(--surface-2); padding: 0 12px 14px 36px; }
+tbody tr.detail-row:hover > td { background: var(--surface-2); }
+.problem-details { display: grid; gap: 10px; font-size: 13px; }
+.problem-details .messages { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.problem-details .messages li { display: flex; gap: 8px; align-items: baseline; overflow-wrap: anywhere; }
+.problem-details .msg-icon { flex: none; width: 14px; text-align: center; color: var(--text-3); }
+.problem-details li.warning .msg-icon { color: var(--warning); }
+.problem-details li.error .msg-icon { color: var(--critical); }
+.problem-details table.compact { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; }
+.problem-details table.compact td, .problem-details table.compact th { padding: 5px 10px; font-size: 12.5px; }
+.problem-details .kv { display: grid; grid-template-columns: max-content 1fr; gap: 3px 14px; margin: 0; }
+.problem-details .kv dt { color: var(--text-3); }
+.problem-details .kv dd { margin: 0; overflow-wrap: anywhere; }
+.muted { color: var(--text-3); }
+.small { font-size: 12px; }
