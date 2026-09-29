@@ -1,11 +1,11 @@
-import { useMemo } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useApi } from "../api";
 import { Empty, ErrorBox } from "../components";
 import { useConsole } from "../context";
 import { ago, bytes, dateTime } from "../format";
 import type { VeeamJob } from "../types";
-import { HistoryStrip, VeeamResultBadge, VeeamRunningBadge } from "../veeam";
+import { HistoryStrip, HistoryTable, VeeamResultBadge, VeeamRunningBadge } from "../veeam";
 
 type Bucket = "success" | "warning" | "failed" | "none";
 
@@ -19,6 +19,7 @@ export default function Backup() {
   const [params, setParams] = useSearchParams();
   const tenant = params.get("tenant") ?? "";
   const result = (params.get("result") ?? "") as Bucket | "";
+  const [open, setOpen] = useState<string | null>(null);
   const { data, error } = useApi<VeeamJob[]>(`/veeam/jobs${tenant ? `?tenant_id=${tenant}` : ""}`, 60000);
 
   const counts = useMemo(() => {
@@ -77,8 +78,16 @@ export default function Backup() {
           </thead>
           <tbody>
             {rows.map((j) => (
-              <tr key={j.id}>
-                <td className="nowrap"><VeeamResultBadge result={j.last_result} enabled={j.enabled} running={j.details?.running} /><VeeamRunningBadge job={j} /></td>
+              <Fragment key={j.id}>
+              <tr
+                className={`clickable ${open === j.id ? "expanded" : ""}`}
+                aria-expanded={open === j.id}
+                onClick={(e) => {
+                  if ((e.target as HTMLElement).closest("a, button")) return;
+                  setOpen(open === j.id ? null : j.id);
+                }}
+              >
+                <td className="nowrap"><span className="chevron" aria-hidden="true">{open === j.id ? "▾" : "▸"}</span> <VeeamResultBadge result={j.last_result} enabled={j.enabled} running={j.details?.running} /><VeeamRunningBadge job={j} /></td>
                 <td>{j.name} <span className="chip">{j.product === "vbr" ? "B&R" : "Agent"}</span></td>
                 <td className="nowrap"><Link to={`/dispositivi/${j.device_id}`}>{j.device_name}</Link></td>
                 <td className="nowrap">{j.tenant_name}</td>
@@ -88,6 +97,12 @@ export default function Backup() {
                 <td className="nowrap muted" title={dateTime(j.last_success)}>{ago(j.last_success)}</td>
                 <td className="num">{j.transferred_bytes != null ? bytes(j.transferred_bytes) : "—"}</td>
               </tr>
+              {open === j.id && (
+                <tr className="detail-row">
+                  <td colSpan={9}><HistoryTable job={j} /></td>
+                </tr>
+              )}
+              </Fragment>
             ))}
           </tbody>
         </table>

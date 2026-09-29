@@ -87,7 +87,7 @@ function duration(s: VeeamSession): string {
   return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")}`;
 }
 
-function HistoryTable({ job }: { job: VeeamJob }) {
+export function HistoryTable({ job }: { job: VeeamJob }) {
   const history = job.details?.history ?? [];
   if (history.length === 0) {
     return <div className="muted small">Nessuna esecuzione negli ultimi {HISTORY_DAYS} giorni{job.details?.history ? "" : " (serve l'agente 0.2.2 o successivo)"}.</div>;
