@@ -147,6 +147,14 @@ function Get-RecentSessions($sessions) {
     return ,$out
 }
 
+# Full o incrementale; $null se la versione di Veeam non lo espone.
+function Get-SessionMode($s) {
+    $f = Get-Prop $s @('IsFullMode', 'IsActiveFullMode')
+    if ($null -eq $f) { try { $f = $s.Info.IsFullMode } catch {} }
+    if ($null -eq $f) { return $null }
+    if ([bool]$f) { return 'full' } else { return 'incremental' }
+}
+
 # Storico degli ultimi 10 giorni per la console (al più 150 sessioni, dalla più recente).
 function Get-History($sessions) {
     $out = New-Object System.Collections.ArrayList
@@ -161,6 +169,7 @@ function Get-History($sessions) {
             result = Get-Result $s
             state = [string](Get-Prop $s @('State'))
             retry = [bool](Test-RetrySession $s)
+            mode = Get-SessionMode $s
             transferred_bytes = Get-Transferred $s
             reason = $(if ($reason) { Limit-Text $reason 300 } else { $null })
         })

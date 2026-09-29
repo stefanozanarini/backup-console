@@ -71,13 +71,15 @@ export function HistoryStrip({ job }: { job: VeeamJob }) {
     <span className="history-strip" role="img"
       aria-label={days.map((d) => `${d.date.toLocaleDateString("it-IT")}: ${label[d.level]}`).join("; ")}>
       {days.map((d) => (
-        <span key={d.date.getTime()} className={`hday ${d.level}`}
+        <span key={d.date.getTime()} className={`hday lvl-${d.level}`}
           title={`${d.date.toLocaleDateString("it-IT", { weekday: "short", day: "numeric", month: "short" })}: ${label[d.level]}` +
             (d.count > 1 ? ` (${d.count} sessioni${d.retries ? `, ${d.retries} retry` : ""})` : "")} />
       ))}
     </span>
   );
 }
+
+const MODE_LABEL: Record<string, string> = { full: "Full", incremental: "Incrementale" };
 
 function duration(s: VeeamSession): string {
   if (!s.start || !s.end) return "—";
@@ -93,7 +95,7 @@ function HistoryTable({ job }: { job: VeeamJob }) {
   return (
     <table className="compact">
       <thead>
-        <tr><th>Avvio</th><th>Fine</th><th>Durata</th><th>Esito</th><th className="num">Trasferiti</th><th>Note</th></tr>
+        <tr><th>Avvio</th><th>Fine</th><th>Durata</th><th>Tipo</th><th>Esito</th><th className="num">Trasferiti</th><th>Note</th></tr>
       </thead>
       <tbody>
         {history.map((s, i) => (
@@ -101,6 +103,7 @@ function HistoryTable({ job }: { job: VeeamJob }) {
             <td className="nowrap">{dateTime(s.start)}</td>
             <td className="nowrap">{dateTime(s.end)}</td>
             <td className="nowrap">{duration(s)}</td>
+            <td className="nowrap">{s.mode ? MODE_LABEL[s.mode] ?? s.mode : "—"}</td>
             <td className="nowrap">
               <VeeamResultBadge result={s.result} running={level(s) === "none" && !!s.state && s.state !== "Stopped"} />
               {level(s) === "none" && s.state && s.state !== "Stopped" && <span className="badge">In corso</span>}
