@@ -100,7 +100,9 @@ function installCommands(server: string, token: string) {
     `  Invoke-WebRequest -UseBasicParsing -Headers @{ 'X-Enroll-Token' = $t } -Uri '${server}/agent/v1/download/windows-amd64' -OutFile $f\n` +
     `  & $f install -server '${server}' -token $t\n` +
     `  if ($LASTEXITCODE -ne 0) { throw "installazione non riuscita (codice $LASTEXITCODE)" }\n` +
-    `  Remove-Item $f\n` +
+    // L'antivirus tiene aperto per qualche secondo l'eseguibile appena usato: pulizia
+    // con qualche tentativo, senza errori se non riesce (è solo un file temporaneo).
+    `  foreach ($i in 1..10) { try { Remove-Item $f -ErrorAction Stop; break } catch { Start-Sleep 2 } }\n` +
     `}`;
   const qnap =
     `# SSH come admin sul NAS: scarica il QPKG giusto, lo installa e registra l'agente.\n` +

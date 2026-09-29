@@ -338,11 +338,20 @@ $out.repositories = $repos
 
 try {
     $l = Get-VBRInstalledLicense
+    $inst = Get-Prop $l @('InstanceLicenseSummary')
+    $sock = Get-Prop $l @('SocketLicenseSummary')
+    $num = { param($o, $names) $v = Get-Prop $o $names; if ($null -ne $v) { [int]$v } else { $null } }
     $out.license = [ordered]@{
         edition = [string]$l.Edition
         status = [string]$l.Status
+        type = [string](Get-Prop $l @('Type'))
+        licensed_to = [string](Get-Prop $l @('LicensedTo'))
         expiration = ConvertTo-IsoDate $l.ExpirationDate
         support_expiration = ConvertTo-IsoDate $l.SupportExpirationDate
+        instances_total = & $num $inst @('LicensedInstancesNumber')
+        instances_used = & $num $inst @('UsedInstancesNumber')
+        sockets_total = & $num $sock @('LicensedSocketsNumber')
+        sockets_used = & $num $sock @('UsedSocketsNumber')
     }
 } catch { Add-CollectorError 'Get-VBRInstalledLicense' $_ }
 

@@ -6,6 +6,7 @@ import { Ctx, makeCanWrite, type ConsoleCtx } from "./context";
 import { ElevationBadge, ElevationProvider } from "./elevation";
 import Approvals from "./pages/Approvals";
 import Backup from "./pages/Backup";
+import Licenses from "./pages/Licenses";
 import DeviceDetailPage from "./pages/DeviceDetail";
 import Devices from "./pages/Devices";
 import Login from "./pages/Login";
@@ -77,6 +78,7 @@ export default function App() {
               <Route path="/dispositivi" element={<Devices />} />
               <Route path="/dispositivi/:id" element={<DeviceDetailPage />} />
               <Route path="/backup" element={<Backup />} />
+              <Route path="/licenze" element={<Licenses />} />
               <Route path="/approvazioni" element={<Approvals />} />
               <Route path="/aggiornamenti" element={<Upgrades />} />
               <Route path="/tenant" element={<Tenants />} />
@@ -110,6 +112,7 @@ function Sidebar() {
       </NavLink>
       <NavLink to="/dispositivi" className="nav-link">Dispositivi</NavLink>
       <NavLink to="/backup" className="nav-link">Backup Veeam</NavLink>
+      <NavLink to="/licenze" className="nav-link">Licenze Veeam</NavLink>
       <NavLink to="/approvazioni" className="nav-link">
         Approvazioni
         {pending && pending.length > 0 && <span className="nav-count">{pending.length}</span>}

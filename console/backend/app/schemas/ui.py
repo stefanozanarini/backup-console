@@ -277,3 +277,24 @@ class VeeamSessionOut(ORM):
     retry: bool
     transferred_bytes: int | None
     reason: str | None
+
+
+class VeeamLicenseRow(BaseModel):
+    device_id: uuid.UUID
+    device_name: str
+    tenant_id: uuid.UUID
+    tenant_name: str
+    site_name: str
+    veeam_version: str | None
+    reported_at: datetime | None
+    online: bool
+    edition: str | None = None
+    status: str | None = None
+    type: str | None = None
+    licensed_to: str | None = None
+    expiration: datetime | None = None
+    support_expiration: datetime | None = None
+    instances_total: int | None = None
+    instances_used: int | None = None
+    sockets_total: int | None = None
+    sockets_used: int | None = None

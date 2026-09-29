@@ -4,7 +4,7 @@ import hashlib
 import json
 import secrets
 import uuid
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile, status
@@ -53,6 +53,7 @@ from app.schemas.ui import (
     VeeamCleanupScanIn,
     VeeamJobOut,
     VeeamJobRow,
+    VeeamLicenseRow,
     VeeamSessionOut,
 )
 from app.services import secrets as secret_store
@@ -344,6 +345,41 @@ async def request_upgrade(body: UpgradeRequest, user: CurrentUserDep, session: S
 
 
 # --- Veeam ------------------------------------------------------------------
+
+
+LICENSE_FIELDS = ("edition", "status", "type", "licensed_to", "expiration", "support_expiration",
+                  "instances_total", "instances_used", "sockets_total", "sockets_used")
+
+
+@router.get("/veeam/licenses", response_model=list[VeeamLicenseRow])
+async def list_veeam_licenses(user: CurrentUserDep, session: SessionDep, tenant_id: uuid.UUID | None = None):
+    """Licenze dei server Veeam B&R (dall'ultimo report di ciascuno), le più vicine alla scadenza prima."""
+    scope = user.tenant_scope()
+    stmt = (
+        select(Device, Tenant.name, Site.name)
+        .join(Tenant, Tenant.id == Device.tenant_id)
+        .join(Site, Site.id == Device.site_id)
+        .options(selectinload(Device.agent))
+        .where(Device.veeam["product"].astext == "vbr")
+    )
+    if scope is not None:
+        stmt = stmt.where(Device.tenant_id.in_(scope))
+    if tenant_id:
+        stmt = stmt.where(Device.tenant_id == tenant_id)
+    online_since = utcnow() - timedelta(seconds=settings.agent_offline_after_s)
+    out = []
+    for d, tn, sn in (await session.execute(stmt)).all():
+        v = d.veeam or {}
+        lic = v.get("license") or {}
+        seen = d.agent.last_seen_at if d.agent else None
+        out.append(VeeamLicenseRow(
+            device_id=d.id, device_name=d.name, tenant_id=d.tenant_id, tenant_name=tn, site_name=sn,
+            veeam_version=v.get("version"), reported_at=v.get("reported_at"),
+            online=seen is not None and seen >= online_since,
+            **{k: lic.get(k) for k in LICENSE_FIELDS},
+        ))
+    far = datetime.max.replace(tzinfo=UTC)
+    return sorted(out, key=lambda r: (r.expiration or far, r.tenant_name, r.device_name))
 
 
 @router.get("/veeam/sessions", response_model=list[VeeamSessionOut])

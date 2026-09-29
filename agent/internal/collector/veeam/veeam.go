@@ -49,8 +49,14 @@ type Repository struct {
 type License struct {
 	Edition           string     `json:"edition,omitempty"`
 	Status            string     `json:"status,omitempty"`
+	Type              string     `json:"type,omitempty"` // Subscription, Perpetual, Rental, Evaluation...
+	LicensedTo        string     `json:"licensed_to,omitempty"`
 	Expiration        *time.Time `json:"expiration,omitempty"`
 	SupportExpiration *time.Time `json:"support_expiration,omitempty"`
+	InstancesTotal    *int       `json:"instances_total,omitempty"`
+	InstancesUsed     *int       `json:"instances_used,omitempty"`
+	SocketsTotal      *int       `json:"sockets_total,omitempty"`
+	SocketsUsed       *int       `json:"sockets_used,omitempty"`
 }
 
 type Payload struct {

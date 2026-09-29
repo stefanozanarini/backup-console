@@ -265,3 +265,24 @@ async def test_collector_failure_and_stale_report(client):
     await client.post("/agent/v1/veeam", headers=auth, json=veeam_report([job("a", "Success")]))
     assert await check_stale_veeam() == 0
     assert (await client.get("/api/v1/problems", headers=as_user())).json() == []
+
+
+async def test_veeam_licenses(client):
+    data, auth = await approved_agent(client, roles=("veeam_vbr",))
+    report = veeam_report([], license_days=20)
+    report["payload"]["license"].update({"type": "Subscription", "licensed_to": "ACME Srl",
+                                         "instances_total": 50, "instances_used": 42})
+    await client.post("/agent/v1/veeam", headers=auth, json=report)
+    await client.post("/agent/v1/heartbeat", json={"version": "0.2.9"}, headers=auth)
+    [row] = (await client.get("/api/v1/veeam/licenses", headers=as_user())).json()
+    assert row["device_id"] == data["device_id"] and row["online"] is True
+    assert row["edition"] == "Enterprise" and row["type"] == "Subscription" and row["licensed_to"] == "ACME Srl"
+    assert row["instances_used"] == 42 and row["expiration"] and row["veeam_version"] == "12.3.1.1139"
+    # I Veeam Agent standalone non hanno licenza da mostrare qui.
+    _, site2 = await setup_site(client, "beta")
+    d2, auth2, _, _ = await enroll(client, site2, roles=("veeam_agent",))
+    await client.post(f"/api/v1/agents/{d2['agent_id']}/approve", headers=as_user())
+    r2 = veeam_report([])
+    r2["payload"]["product"] = "vaw"
+    await client.post("/agent/v1/veeam", headers=auth2, json=r2)
+    assert len((await client.get("/api/v1/veeam/licenses", headers=as_user())).json()) == 1

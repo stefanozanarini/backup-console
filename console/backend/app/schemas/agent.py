@@ -115,10 +115,16 @@ class VeeamRepositoryIn(BaseModel):
 
 
 class VeeamLicenseIn(BaseModel):
-    edition: str | None = None
-    status: str | None = None
+    edition: str | None = Field(None, max_length=100)
+    status: str | None = Field(None, max_length=100)
+    type: str | None = Field(None, max_length=100)
+    licensed_to: str | None = Field(None, max_length=300)
     expiration: datetime | None = None
     support_expiration: datetime | None = None
+    instances_total: int | None = None
+    instances_used: int | None = None
+    sockets_total: int | None = None
+    sockets_used: int | None = None
 
 
 class VeeamPayload(BaseModel):
