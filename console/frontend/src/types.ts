@@ -151,6 +151,7 @@ export interface VeeamJob {
   };
   device_name: string;
   tenant_name: string;
+  site_name: string;
 }
 
 export type CommandStatus = "queued" | "dispatched" | "running" | "succeeded" | "failed" | "timeout" | "expired";

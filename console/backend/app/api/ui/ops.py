@@ -31,6 +31,7 @@ from app.models import (
     Elevation,
     Release,
     ReleaseAsset,
+    Site,
     Tenant,
     VeeamJob,
 )
@@ -353,9 +354,10 @@ async def list_veeam_jobs(
 ):
     scope = user.tenant_scope()
     stmt = (
-        select(VeeamJob, Device.name, Tenant.name)
+        select(VeeamJob, Device.name, Tenant.name, Site.name)
         .join(Device, Device.id == VeeamJob.device_id)
         .join(Tenant, Tenant.id == VeeamJob.tenant_id)
+        .join(Site, Site.id == Device.site_id)
     )
     if scope is not None:
         stmt = stmt.where(VeeamJob.tenant_id.in_(scope))
@@ -365,10 +367,10 @@ async def list_veeam_jobs(
         stmt = stmt.where(VeeamJob.device_id == device_id)
     if result:
         stmt = stmt.where(func.lower(VeeamJob.last_result) == result.lower())
-    rows = (await session.execute(stmt.order_by(Tenant.name, Device.name, VeeamJob.name))).all()
+    rows = (await session.execute(stmt.order_by(Tenant.name, Site.name, Device.name, VeeamJob.name))).all()
     return [
-        VeeamJobRow(**VeeamJobOut.model_validate(j).model_dump(), device_name=dn, tenant_name=tn)
-        for j, dn, tn in rows
+        VeeamJobRow(**VeeamJobOut.model_validate(j).model_dump(), device_name=dn, tenant_name=tn, site_name=sn)
+        for j, dn, tn, sn in rows
     ]
 
 

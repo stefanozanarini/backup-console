@@ -210,6 +210,7 @@ async def test_running_job_keeps_last_completed_result(client):
     await client.post("/agent/v1/veeam", headers=auth, json=veeam_report([running]))
     [j] = (await client.get(f"/api/v1/veeam/jobs?device_id={data['device_id']}", headers=as_user())).json()
     assert j["last_result"] == "Warning" and j["last_success"] is not None
+    assert j["site_name"]
     assert j["details"]["running"] is True and j["details"]["progress_pct"] == 85
 
 

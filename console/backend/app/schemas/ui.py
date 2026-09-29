@@ -260,3 +260,4 @@ class VeeamJobOut(ORM):
 class VeeamJobRow(VeeamJobOut):
     device_name: str
     tenant_name: str
+    site_name: str
