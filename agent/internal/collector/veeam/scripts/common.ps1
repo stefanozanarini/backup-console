@@ -28,8 +28,11 @@ function ConvertTo-IsoDate($d) {
 function Get-Prop($obj, [string[]]$names) {
     if ($null -eq $obj) { return $null }
     foreach ($n in $names) {
-        $p = $obj.PSObject.Properties[$n]
-        if ($p -and $null -ne $p.Value) { return $p.Value }
+        # Alcune proprietà degli oggetti Veeam leggono dal database e possono fallire.
+        try {
+            $p = $obj.PSObject.Properties[$n]
+            if ($p -and $null -ne $p.Value) { return $p.Value }
+        } catch {}
     }
     return $null
 }

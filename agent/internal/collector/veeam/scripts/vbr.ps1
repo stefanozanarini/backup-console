@@ -1,6 +1,9 @@
 # Veeam Backup & Replication v11 / v12 / v13 (Windows). Gira come LocalSystem sul server
 # VBR: il gruppo Administrators locale è amministratore Veeam per impostazione predefinita.
 $out = [ordered]@{ product = 'vbr'; version = $null; jobs = @(); repositories = @(); license = $null; errors = @() }
+# L'agente imposta $IncludeHistory = $false per la raccolta di base (se quella completa
+# non riesce nel tempo): solo l'ultima sessione di ogni job, niente storico.
+if ($null -eq $IncludeHistory) { $IncludeHistory = $true }
 
 try {
     Import-Module Veeam.Backup.PowerShell -DisableNameChecking -ErrorAction Stop | Out-Null
@@ -95,6 +98,7 @@ $historyBudgetSec = 180
 $script:historySkipped = $false
 function Get-JobSessions($jobId, $known) {
     $known = @($known | Where-Object { $_ })
+    if (-not $IncludeHistory) { return @($known | Sort-Object { [datetime](Get-Prop $_ @('CreationTime')) } -Descending) }
     if ($historyBudget.Elapsed.TotalSeconds -gt $historyBudgetSec) {
         if (-not $script:historySkipped) {
             $script:historySkipped = $true
@@ -202,9 +206,33 @@ function Get-History($sessions) {
 #   - l'ultima avviata (può essere ancora in corso: esito "None" finché non termina);
 #   - l'ultima terminata, che dà l'esito, la fine e i messaggi;
 #   - l'ultima riuscita (anche con avvisi: il restore point è stato creato).
+# Un job che dà errore non deve far fallire l'intero report: in quel caso lo riportiamo
+# con l'esito dell'ultima sessione nota e l'errore nei dettagli.
 function Add-Job($id, $name, $type, $enabled, $session, $next, $details) {
     if ($seen.ContainsKey($id)) { return }
+    $before = $jobs.Count
+    try { Add-JobCore $id $name $type $enabled $session $next $details } catch {
+        Add-CollectorError "job $name" $_
+        while ($jobs.Count -gt $before) { $jobs.RemoveAt($jobs.Count - 1) }
+        $last = @($session | Where-Object { $_ } | Sort-Object { [datetime](Get-Prop $_ @('CreationTime')) } -Descending | Select-Object -First 1)
+        $s0 = $(if ($last.Count -gt 0) { $last[0] } else { $null })
+        [void]$jobs.Add([ordered]@{
+            id = [string]$id
+            name = [string]$name
+            type = [string]$type
+            enabled = [bool]$enabled
+            last_result = $(if ($s0) { Get-Result $s0 } else { $null })
+            last_state = $(if ($s0) { [string](Get-Prop $s0 @('State')) } else { $null })
+            last_start = $(if ($s0) { ConvertTo-IsoDate (Get-Prop $s0 @('CreationTime')) } else { $null })
+            last_end = $(if ($s0) { ConvertTo-IsoDate (Get-Prop $s0 @('EndTime')) } else { $null })
+            next_run = $next
+            details = [ordered]@{ collector_error = $_.Exception.Message }
+        })
+    }
     $seen[$id] = $true
+}
+
+function Add-JobCore($id, $name, $type, $enabled, $session, $next, $details) {
     if (-not $details) { $details = [ordered]@{} }
     $sessions = @()
     try { $sessions = @(Get-JobSessions $id $session) } catch { Add-CollectorError "sessioni $name" $_; if ($session) { $sessions = @($session) } }

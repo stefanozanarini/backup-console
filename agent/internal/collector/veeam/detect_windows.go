@@ -40,15 +40,22 @@ func encodePS(script string) string {
 
 // runPowerShell prova Windows PowerShell 5.1 e, se il modulo Veeam non si carica
 // (Veeam B&R 13 lo richiede su PowerShell 7), ripiega su pwsh.
+//
+// Lo script non va sulla riga di comando: Windows la limita a 32767 caratteri e con
+// -EncodedCommand (UTF-16 in base64) uno script di 12 KB la supera già. Sulla riga di
+// comando c'è solo psBootstrap, lo script arriva da stdin (base64 dell'UTF-8, così
+// non dipende dalla codifica della console) e non passa mai da un file su disco.
 func runPowerShell(ctx context.Context, script string) ([]byte, error) {
-	enc := encodePS(script)
+	boot := encodePS(psBootstrap)
+	input := base64.StdEncoding.EncodeToString([]byte(script))
 	var lastErr error
 	for _, exe := range []string{"powershell.exe", "pwsh.exe"} {
 		if _, err := exec.LookPath(exe); err != nil {
 			continue
 		}
-		cmd := exec.CommandContext(ctx, exe, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", enc)
+		cmd := exec.CommandContext(ctx, exe, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", boot)
 		var stdout, stderr bytes.Buffer
+		cmd.Stdin = strings.NewReader(input)
 		cmd.Stdout, cmd.Stderr = &stdout, &stderr
 		if err := cmd.Run(); err != nil {
 			lastErr = fmt.Errorf("%s: %v: %s", exe, err, strings.TrimSpace(stderr.String()))

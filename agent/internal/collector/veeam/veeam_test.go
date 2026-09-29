@@ -2,6 +2,8 @@ package veeam
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 )
 
@@ -61,6 +63,31 @@ func TestReportUsesScriptOutput(t *testing.T) {
 
 func TestParseRejectsGarbage(t *testing.T) {
 	if _, err := Parse([]byte("Import-Module : impossibile caricare")); err == nil {
+		t.Fatal("atteso errore")
+	}
+}
+
+func TestReportFallsBackToBasic(t *testing.T) {
+	var scripts []string
+	c := &Collector{product: "vbr", script: "#vbr", run: func(_ context.Context, script string) ([]byte, error) {
+		scripts = append(scripts, script)
+		if !strings.Contains(script, "$IncludeHistory = $false") {
+			return nil, errors.New("timeout")
+		}
+		return []byte(`{"product":"vbr","jobs":[{"id":"a","name":"A","enabled":true,"last_result":"Warning"}],"repositories":[],"errors":[]}`), nil
+	}}
+	_, payload, err := c.Report(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := payload.(Payload)
+	if len(scripts) != 2 || len(p.Jobs) != 1 || len(p.Errors) != 1 || !strings.Contains(p.Errors[0], "storico sessioni non raccolto: timeout") {
+		t.Fatalf("scripts=%d payload=%+v", len(scripts), p)
+	}
+
+	// Veeam Agent: nessun ripiego, l'errore arriva in console.
+	c.product = "vaw"
+	if _, _, err := c.Report(context.Background()); err == nil {
 		t.Fatal("atteso errore")
 	}
 }

@@ -138,7 +138,7 @@ foreach ($name in $byJob.Keys) {
     if ($e.last) {
         $st = Find-Start $e.last $name
         $details.message = Get-EventText $e.last
-        if ((Get-Result $e.last) -ne 'Success') { $details.messages = Get-EventMessages $e.last }
+        if ((Get-Result $e.last) -ne 'Success') { $details.messages = @(Get-EventMessages $e.last) }
     }
     [void]$jobs.Add([ordered]@{
         id = "vaw:$name"

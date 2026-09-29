@@ -7,6 +7,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -140,22 +141,57 @@ func (c *Collector) Inventory(context.Context) (collector.Inventory, error) {
 
 func (c *Collector) Metrics(context.Context) ([]collector.Metric, error) { return nil, nil }
 
+// Tempi massimi della raccolta: quella completa (con lo storico delle sessioni, che su
+// server B&R con molti job di copia può essere lenta) e quella di base, che parte se la
+// prima non riesce, così esiti, repository e licenza arrivano comunque in console.
+var (
+	fullTimeout  = 4 * time.Minute
+	basicTimeout = 5 * time.Minute
+)
+
 // Report esegue lo script e ritorna il payload per /agent/v1/veeam.
 func (c *Collector) Report(ctx context.Context) (string, any, error) {
-	// Lo storico delle sessioni su server VBR con molti job può richiedere qualche minuto.
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
-	defer cancel()
-	out, err := c.run(ctx, commonPS+"\n"+c.script)
+	p, err := c.collect(ctx, fullTimeout, "")
+	if err != nil && c.product == "vbr" && ctx.Err() == nil {
+		log.Printf("veeam: raccolta completa non riuscita, ripiego sulla raccolta di base: %v", err)
+		var errBasic error
+		p, errBasic = c.collect(ctx, basicTimeout, "$IncludeHistory = $false\n")
+		if errBasic != nil {
+			return "", nil, fmt.Errorf("%v; anche la raccolta di base: %w", err, errBasic)
+		}
+		p.Errors = append(p.Errors, "storico sessioni non raccolto: "+truncate(err.Error(), 500))
+		err = nil
+	}
 	if err != nil {
 		return "", nil, err
 	}
-	p, err := Parse(out)
-	if err != nil {
-		return "", nil, err
-	}
-	p.Product = c.product
 	c.mu.Lock()
 	c.last = &p
 	c.mu.Unlock()
 	return "/agent/v1/veeam", p, nil
+}
+
+func (c *Collector) collect(ctx context.Context, timeout time.Duration, prelude string) (Payload, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	out, err := c.run(ctx, commonPS+"\n"+prelude+c.script)
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return Payload{}, fmt.Errorf("script Veeam oltre %s: %w", timeout, err)
+		}
+		return Payload{}, err
+	}
+	p, err := Parse(out)
+	if err != nil {
+		return Payload{}, err
+	}
+	p.Product = c.product
+	return p, nil
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }
