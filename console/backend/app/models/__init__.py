@@ -6,7 +6,7 @@ from app.models.releases import PACKAGES, PLATFORMS, Release, ReleaseAsset
 from app.models.problems import CheckRule, Problem, ProblemState, Severity
 from app.models.telemetry import AgentMessage, Event, InventorySnapshot, Metric
 from app.models.tenancy import ApiKey, Elevation, LocalSession, Role, RoleAssignment, Site, Tenant, User
-from app.models.veeam import VeeamJob
+from app.models.veeam import VeeamJob, VeeamSession
 
 __all__ = [
     "FINAL_STATUSES",
@@ -23,6 +23,7 @@ __all__ = [
     "Release",
     "ReleaseAsset",
     "VeeamJob",
+    "VeeamSession",
     "Agent",
     "AgentMessage",
     "AgentStatus",

@@ -42,7 +42,10 @@ class Metric(Base):
     labels: Mapped[dict[str, Any]] = mapped_column(default=dict)  # es. {"mount": "/share/CACHEDEV1_DATA"}
     value: Mapped[float]
 
-    __table_args__ = (Index("ix_metrics_device_name_ts", "device_id", "name", "ts"),)
+    __table_args__ = (
+        Index("ix_metrics_device_name_ts", "device_id", "name", "ts"),
+        Index("ix_metrics_ts", "ts"),  # retention
+    )
 
 
 class Event(Base):
@@ -56,4 +59,4 @@ class Event(Base):
     severity: Mapped[str] = mapped_column(String(16), default="info")
     data: Mapped[dict[str, Any]] = mapped_column(default=dict)
 
-    __table_args__ = (Index("ix_events_device_ts", "device_id", "ts"),)
+    __table_args__ = (Index("ix_events_device_ts", "device_id", "ts"), Index("ix_events_ts", "ts"))

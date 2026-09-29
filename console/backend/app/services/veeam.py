@@ -2,10 +2,13 @@
 
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, select
+from typing import Any
+
+from sqlalchemy import delete, or_, select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Device, Metric, Severity, VeeamJob
+from app.models import Device, Metric, Severity, VeeamJob, VeeamSession
 from app.models.base import utcnow
 from app.schemas.agent import VeeamPayload
 from app.services.problems import evaluate_metrics, raise_problem, resolve_problem, thresholds_for
@@ -27,6 +30,67 @@ def _messages(job: VeeamJob) -> list[dict]:
     return []
 
 
+def _ts(v: Any) -> datetime | None:
+    if not isinstance(v, str) or not v:
+        return None
+    try:
+        t = datetime.fromisoformat(v)
+    except ValueError:
+        return None
+    return t if t.tzinfo else t.replace(tzinfo=UTC)
+
+
+def _session_rows(device: Device, product: str, job_key: str, job_name: str,
+                  details: dict[str, Any] | None, now: datetime) -> list[dict[str, Any]]:
+    """Righe per veeam_sessions dallo storico che l'agente mette nei dettagli del job."""
+    rows = []
+    for e in (details or {}).get("history") or []:
+        if not isinstance(e, dict):
+            continue
+        start, end = _ts(e.get("start")), _ts(e.get("end"))
+        # Chiave stabile della sessione: per B&R l'id Veeam (o l'avvio, che resta uguale
+        # mentre la sessione è in corso); per Veeam Agent la fine, sempre presente nell'evento.
+        if product == "vaw":
+            key = e.get("end")
+        else:
+            key = e.get("id") or e.get("start") or e.get("end")
+        if not key or (start is None and end is None):
+            continue
+        transferred = e.get("transferred_bytes")
+        rows.append({
+            "tenant_id": device.tenant_id, "device_id": device.id, "product": product,
+            "job_key": job_key, "job_name": job_name[:300], "session_key": str(key)[:100],
+            "started_at": start, "ended_at": end,
+            "result": (str(e["result"])[:32] if e.get("result") else None),
+            "state": (str(e["state"])[:32] if e.get("state") else None),
+            "mode": e.get("mode") if e.get("mode") in ("full", "incremental") else None,
+            "retry": bool(e.get("retry")),
+            "transferred_bytes": transferred if isinstance(transferred, int) else None,
+            "reason": (str(e["reason"])[:2000] if e.get("reason") else None),
+            "updated_at": now,
+        })
+    return rows
+
+
+UPDATABLE = ("job_name", "started_at", "ended_at", "result", "state", "mode", "retry", "transferred_bytes", "reason")
+
+
+async def _store_sessions(session: AsyncSession, rows: list[dict[str, Any]]) -> None:
+    """Upsert: una sessione già salvata si aggiorna solo se è cambiata (es. era in corso)."""
+    # Stessa chiave due volte nello stesso report (non dovrebbe capitare): vince l'ultima.
+    unique = {(r["device_id"], r["job_key"], r["session_key"]): r for r in rows}
+    rows = list(unique.values())
+    for i in range(0, len(rows), 500):
+        stmt = insert(VeeamSession).values(rows[i:i + 500])
+        ex = stmt.excluded
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["device_id", "job_key", "session_key"],
+            set_={c: ex[c] for c in (*UPDATABLE, "updated_at")},
+            where=or_(*(getattr(VeeamSession, c).is_distinct_from(ex[c]) for c in UPDATABLE)),
+        )
+        await session.execute(stmt)
+
+
 class _M:
     """Metrica minima per evaluate_metrics."""
 
@@ -43,6 +107,7 @@ async def ingest(session: AsyncSession, device: Device, p: VeeamPayload, ts: dat
         )
     }
     seen: set[str] = set()
+    sessions: list[dict[str, Any]] = []
     for j in p.jobs:
         seen.add(j.id)
         row = existing.get(j.id)
@@ -58,6 +123,8 @@ async def ingest(session: AsyncSession, device: Device, p: VeeamPayload, ts: dat
         elif (j.last_result or "").lower() == "success" and j.last_end:
             row.last_success = j.last_end
         await _evaluate_job(session, device, row, now)
+        sessions.extend(_session_rows(device, p.product, j.id, j.name, j.details, now))
+    await _store_sessions(session, sessions)
 
     # Job eliminati in Veeam: rimuoviamo riga e problemi.
     for key, row in existing.items():

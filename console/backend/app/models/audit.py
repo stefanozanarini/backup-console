@@ -9,7 +9,7 @@ from app.models.base import Base, utcnow
 
 
 class AuditLog(Base):
-    """Append-only: il codice non aggiorna né cancella mai righe di questa tabella."""
+    """Append-only: il codice non aggiorna mai le righe; le cancella solo la retention."""
 
     __tablename__ = "audit_log"
 

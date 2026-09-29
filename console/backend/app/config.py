@@ -56,5 +56,15 @@ class Settings(BaseSettings):
     agent_offline_after_s: int = 300
     worker_interval_s: int = 60
 
+    # Retention dei dati (giorni). 0 = conserva per sempre.
+    retention_metrics_raw_days: int = 90  # dopo: un valore medio all'ora
+    retention_metrics_days: int = 730
+    retention_inventory_full_days: int = 7  # dopo: un'istantanea al giorno
+    retention_inventory_days: int = 365  # l'ultima di ogni dispositivo resta comunque
+    retention_events_days: int = 90  # eventi degli agenti e id dei messaggi ricevuti
+    # Problemi risolti, comandi conclusi, audit, sessioni Veeam.
+    retention_history_days: int = 730
+    retention_interval_h: int = 6
+
 
 settings = Settings()

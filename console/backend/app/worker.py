@@ -1,4 +1,4 @@
-"""Job periodici: rilevamento agenti offline (poi: notifiche, retention, scadenza certificati)."""
+"""Job periodici: agenti offline, report Veeam fermi, comandi scaduti, retention dei dati."""
 
 import asyncio
 import logging
@@ -11,6 +11,7 @@ from app.config import settings
 from app.db import SessionLocal
 from app.models import Agent, AgentStatus, Command, CommandStatus, DeviceKind, Severity
 from app.models.base import utcnow
+from app.services import retention
 from app.services.problems import raise_problem, resolve_problem
 
 log = logging.getLogger("bc.worker")
@@ -111,6 +112,7 @@ async def expire_commands() -> int:
 async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     log.info("worker avviato, intervallo %ss", settings.worker_interval_s)
+    last_retention = None
     while True:
         try:
             n = await check_offline_agents()
@@ -120,6 +122,9 @@ async def main() -> None:
                 log.info("report Veeam fermi: %d", k)
             if m := await expire_commands():
                 log.info("comandi scaduti: %d", m)
+            if last_retention is None or utcnow() - last_retention >= timedelta(hours=settings.retention_interval_h):
+                last_retention = utcnow()
+                await retention.run()
         except Exception:
             log.exception("errore nel ciclo del worker")
         await asyncio.sleep(settings.worker_interval_s)

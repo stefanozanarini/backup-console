@@ -243,6 +243,7 @@ class VeeamJobOut(ORM):
     tenant_id: uuid.UUID
     device_id: uuid.UUID
     product: str
+    job_key: str
     name: str
     job_type: str | None
     enabled: bool
@@ -261,3 +262,18 @@ class VeeamJobRow(VeeamJobOut):
     device_name: str
     tenant_name: str
     site_name: str
+
+
+class VeeamSessionOut(ORM):
+    device_id: uuid.UUID
+    product: str
+    job_key: str
+    job_name: str
+    started_at: datetime | None
+    ended_at: datetime | None
+    result: str | None
+    state: str | None
+    mode: str | None
+    retry: bool
+    transferred_bytes: int | None
+    reason: str | None

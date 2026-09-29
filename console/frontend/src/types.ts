@@ -135,6 +135,7 @@ export interface VeeamJob {
   tenant_id: string;
   device_id: string;
   product: "vbr" | "vaw";
+  job_key: string;
   name: string;
   job_type: string | null;
   enabled: boolean;

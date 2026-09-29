@@ -87,12 +87,44 @@ function duration(s: VeeamSession): string {
   return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")}`;
 }
 
+const PERIODS = [10, 30, 90, 365];
+
+interface StoredSession {
+  started_at: string | null; ended_at: string | null; result: string | null; state: string | null;
+  mode: "full" | "incremental" | null; retry: boolean; transferred_bytes: number | null; reason: string | null;
+}
+
+/** Sessioni salvate in console: restano anche dopo che Veeam le ha cancellate. */
 export function HistoryTable({ job }: { job: VeeamJob }) {
-  const history = job.details?.history ?? [];
-  if (history.length === 0) {
-    return <div className="muted small">Nessuna esecuzione negli ultimi {HISTORY_DAYS} giorni{job.details?.history ? "" : " (serve l'agente 0.2.2 o successivo)"}.</div>;
-  }
+  const [days, setDays] = useState(HISTORY_DAYS);
+  const stored = useApi<StoredSession[]>(
+    `/veeam/sessions?device_id=${job.device_id}&job_key=${encodeURIComponent(job.job_key)}&days=${days}`, 60000,
+  );
+  // Finché la console non ha ancora salvato nulla, lo storico che manda l'agente.
+  const history: VeeamSession[] = stored.data && stored.data.length > 0
+    ? stored.data.map((s) => ({
+      start: s.started_at, end: s.ended_at, result: s.result, state: s.state, mode: s.mode,
+      retry: s.retry, transferred_bytes: s.transferred_bytes, reason: s.reason,
+    }))
+    : stored.data ? job.details?.history ?? [] : [];
+  const counts = history.reduce((c, s) => ({ ...c, [level(s)]: (c[level(s)] ?? 0) + 1 }), {} as Record<string, number>);
   return (
+    <div className="stack" style={{ gap: 8 }}>
+      <div className="form-row small">
+        <select value={days} onChange={(e) => setDays(Number(e.target.value))} aria-label="Periodo">
+          {PERIODS.map((d) => <option key={d} value={d}>ultimi {d} giorni</option>)}
+        </select>
+        {history.length > 0 && (
+          <span className="muted">
+            {history.length} sessioni · {counts.success ?? 0} riuscite · {counts.warning ?? 0} con avvisi · {counts.failed ?? 0} fallite
+          </span>
+        )}
+      </div>
+      {stored.data && history.length === 0 ? (
+        <div className="muted small">
+          Nessuna esecuzione negli ultimi {days} giorni{job.details?.history ? "" : " (serve l'agente 0.2.2 o successivo)"}.
+        </div>
+      ) : (
     <table className="compact">
       <thead>
         <tr><th>Avvio</th><th>Fine</th><th>Durata</th><th>Tipo</th><th>Esito</th><th className="num">Trasferiti</th><th>Note</th></tr>
@@ -115,6 +147,8 @@ export function HistoryTable({ job }: { job: VeeamJob }) {
         ))}
       </tbody>
     </table>
+      )}
+    </div>
   );
 }
 

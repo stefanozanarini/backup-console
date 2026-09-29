@@ -34,6 +34,7 @@ from app.models import (
     Site,
     Tenant,
     VeeamJob,
+    VeeamSession,
 )
 from app.models.base import utcnow
 from app.schemas.ui import (
@@ -52,6 +53,7 @@ from app.schemas.ui import (
     VeeamCleanupScanIn,
     VeeamJobOut,
     VeeamJobRow,
+    VeeamSessionOut,
 )
 from app.services import secrets as secret_store
 from app.services import totp
@@ -342,6 +344,34 @@ async def request_upgrade(body: UpgradeRequest, user: CurrentUserDep, session: S
 
 
 # --- Veeam ------------------------------------------------------------------
+
+
+@router.get("/veeam/sessions", response_model=list[VeeamSessionOut])
+async def list_veeam_sessions(
+    user: CurrentUserDep,
+    session: SessionDep,
+    device_id: uuid.UUID | None = None,
+    tenant_id: uuid.UUID | None = None,
+    job_key: str | None = Query(None, max_length=200),
+    days: int = Query(30, ge=1, le=3650),
+    limit: int = Query(1000, ge=1, le=5000),
+):
+    """Storico delle sessioni salvato in console (anche oltre la retention di Veeam)."""
+    if device_id is None and tenant_id is None:
+        raise HTTPException(400, "serve device_id o tenant_id")
+    scope = user.tenant_scope()
+    since = utcnow() - timedelta(days=days)
+    when = func.coalesce(VeeamSession.started_at, VeeamSession.ended_at)
+    stmt = select(VeeamSession).where(when >= since)
+    if scope is not None:
+        stmt = stmt.where(VeeamSession.tenant_id.in_(scope))
+    if device_id:
+        stmt = stmt.where(VeeamSession.device_id == device_id)
+    if tenant_id:
+        stmt = stmt.where(VeeamSession.tenant_id == tenant_id)
+    if job_key:
+        stmt = stmt.where(VeeamSession.job_key == job_key)
+    return (await session.scalars(stmt.order_by(when.desc()).limit(limit))).all()
 
 
 @router.get("/veeam/jobs", response_model=list[VeeamJobRow])
