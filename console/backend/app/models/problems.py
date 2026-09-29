@@ -16,7 +16,7 @@ class Severity(StrEnum):
 
 class ProblemState(StrEnum):
     OPEN = "open"
-    ACKNOWLEDGED = "acknowledged"
+    ACKNOWLEDGED = "acknowledged"  # non più usato: la presa in carico è stata tolta
     RESOLVED = "resolved"
 
 

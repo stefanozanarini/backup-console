@@ -1,28 +1,24 @@
 import { Fragment, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { api, notifyChange, useApi } from "../api";
+import { useApi } from "../api";
 import { Empty, ErrorBox, SeverityBadge, StateBadge } from "../components";
 import { useConsole } from "../context";
 import { ago, dateTime } from "../format";
 import type { Problem, TenantSummary } from "../types";
 
 const STATE_FILTERS = {
-  active: "state=open&state=acknowledged",
   open: "state=open",
-  acknowledged: "state=acknowledged",
   resolved: "state=resolved",
 } as const;
 type StateFilter = keyof typeof STATE_FILTERS;
 
 export default function Problems() {
-  const { tenants, canWrite } = useConsole();
+  const { tenants } = useConsole();
   const [params, setParams] = useSearchParams();
   const tenant = params.get("tenant") ?? "";
   const severity = params.get("severity") ?? "";
-  const state = (params.get("state") as StateFilter) || "active";
-  const [busy, setBusy] = useState<string | null>(null);
+  const state: StateFilter = params.get("state") === "resolved" ? "resolved" : "open";
   const [open, setOpen] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<Error | null>(null);
 
   const q = [STATE_FILTERS[state], tenant && `tenant_id=${tenant}`, severity && `severity=${severity}`]
     .filter(Boolean)
@@ -35,20 +31,6 @@ export default function Problems() {
     if (value) next.set(key, value);
     else next.delete(key);
     setParams(next, { replace: true });
-  }
-
-  async function ack(p: Problem) {
-    setBusy(p.id);
-    setActionError(null);
-    try {
-      await api(`/problems/${p.id}/ack`, { method: "POST" });
-      await Promise.all([problems.reload(), summary.reload()]);
-      notifyChange();
-    } catch (e) {
-      setActionError(e as Error);
-    } finally {
-      setBusy(null);
-    }
   }
 
   const totals = (summary.data ?? []).reduce(
@@ -88,15 +70,13 @@ export default function Problems() {
           <option value="critical">Critico</option>
           <option value="warning">Attenzione</option>
         </select>
-        <select value={state} onChange={(e) => setFilter("state", e.target.value === "active" ? "" : e.target.value)} aria-label="Stato">
-          <option value="active">Aperti e presi in carico</option>
-          <option value="open">Solo aperti</option>
-          <option value="acknowledged">Solo presi in carico</option>
+        <select value={state} onChange={(e) => setFilter("state", e.target.value === "open" ? "" : e.target.value)} aria-label="Stato">
+          <option value="open">Aperti</option>
           <option value="resolved">Risolti</option>
         </select>
       </div>
 
-      <ErrorBox error={problems.error ?? actionError} />
+      <ErrorBox error={problems.error} />
       <div className="table-wrap">
         <table>
           <thead>
@@ -107,8 +87,7 @@ export default function Problems() {
               <th>Problema</th>
               <th>Dal</th>
               <th>Ultimo rilevamento</th>
-              <th>Stato</th>
-              <th />
+              <th>{state === "resolved" ? "Risolto" : "Stato"}</th>
             </tr>
           </thead>
           <tbody>
@@ -117,7 +96,7 @@ export default function Problems() {
               <tr
                 className={`clickable ${open === p.id ? "expanded" : ""}`}
                 onClick={(e) => {
-                  // I link e i pulsanti della riga mantengono il loro comportamento.
+                  // I link della riga mantengono il loro comportamento.
                   if ((e.target as HTMLElement).closest("a, button")) return;
                   setOpen(open === p.id ? null : p.id);
                 }}
@@ -131,18 +110,15 @@ export default function Problems() {
                 </td>
                 <td className="nowrap" title={dateTime(p.first_seen)}>{ago(p.first_seen)}</td>
                 <td className="nowrap muted" title={dateTime(p.last_seen)}>{ago(p.last_seen)}</td>
-                <td><StateBadge state={p.state} /></td>
-                <td className="num">
-                  {p.state === "open" && canWrite(p.tenant_id) && (
-                    <button className="btn small" disabled={busy === p.id} onClick={() => void ack(p)}>
-                      Prendi in carico
-                    </button>
-                  )}
+                <td className="nowrap">
+                  {p.state === "resolved" && p.resolved_at
+                    ? <span title={dateTime(p.resolved_at)}>{ago(p.resolved_at)}</span>
+                    : <StateBadge state={p.state} />}
                 </td>
               </tr>
               {open === p.id && (
                 <tr className="detail-row">
-                  <td colSpan={8}><ProblemDetails problem={p} /></td>
+                  <td colSpan={7}><ProblemDetails problem={p} /></td>
                 </tr>
               )}
               </Fragment>

@@ -330,7 +330,7 @@ async def list_problems(
     severity: Severity | None = None,
     limit: int = Query(200, le=1000),
 ):
-    states = state or [ProblemState.OPEN, ProblemState.ACKNOWLEDGED]
+    states = state or [ProblemState.OPEN]
     sev_order = case((Problem.severity == Severity.CRITICAL, 0), else_=1)
     stmt = (
         _scoped(select(Problem, Tenant.name, Device.name), Problem.tenant_id, user)
@@ -367,19 +367,3 @@ async def problems_summary(user: CurrentUserDep, session: SessionDep):
         row = out.setdefault(str(tid), {"tenant_id": tid, "tenant_name": name, "warning": 0, "critical": 0})
         row[sev] = n
     return sorted(out.values(), key=lambda r: (-r["critical"], -r["warning"], r["tenant_name"]))
-
-
-@router.post("/problems/{problem_id}/ack", response_model=ProblemOut)
-async def ack_problem(problem_id: uuid.UUID, user: CurrentUserDep, session: SessionDep, request: Request):
-    problem = await session.get(Problem, problem_id)
-    if problem is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "non trovato")
-    user.require_write(problem.tenant_id)
-    if problem.state == ProblemState.RESOLVED:
-        raise HTTPException(status.HTTP_409_CONFLICT, "problema già risolto")
-    problem.state = ProblemState.ACKNOWLEDGED
-    problem.acked_by, problem.acked_at = user.id, utcnow()
-    audit(session, "problem.ack", user_id=user.id, tenant_id=problem.tenant_id,
-          target=str(problem.id), ip=client_ip(request))
-    await session.commit()
-    return problem

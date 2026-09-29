@@ -1,4 +1,4 @@
-"""Valutazione delle soglie e ciclo di vita dei problemi (open → acknowledged → resolved)."""
+"""Valutazione delle soglie e ciclo di vita dei problemi (open → resolved, in automatico)."""
 
 import uuid
 from collections.abc import Iterable
