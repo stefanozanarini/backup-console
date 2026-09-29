@@ -115,6 +115,7 @@ class DeviceOut(ORM):
     os_version: str | None
     last_seen_at: datetime | None
     agent: AgentOut | None
+    site_name: str | None = None
 
 
 class DeviceDetail(DeviceOut):

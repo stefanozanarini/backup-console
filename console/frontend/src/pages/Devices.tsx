@@ -63,6 +63,7 @@ export default function Devices() {
               <th>Nome</th>
               <th>Tipo</th>
               <th>Tenant</th>
+              <th>Sito</th>
               <th>Modello</th>
               <th>Sistema</th>
               <th>Agente</th>
@@ -76,6 +77,7 @@ export default function Devices() {
                 <td className="nowrap"><Link to={`/dispositivi/${d.id}`}>{d.name}</Link></td>
                 <td>{KIND_LABEL[d.kind]}</td>
                 <td className="nowrap">{tenantName(d.tenant_id)}</td>
+                <td className="nowrap">{d.site_name ?? <span className="muted">—</span>}</td>
                 <td>{d.model ?? <span className="muted">—</span>}</td>
                 <td>{d.os_version ?? d.platform}</td>
                 <td className="mono">{d.agent?.version ?? "—"}</td>

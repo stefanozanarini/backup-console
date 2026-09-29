@@ -214,7 +214,10 @@ async def list_devices(
         stmt = stmt.where(Device.kind == kind)
     if agent_status:
         stmt = stmt.join(Agent, Agent.device_id == Device.id).where(Agent.status == agent_status)
-    return (await session.scalars(stmt.order_by(Device.name))).all()
+    devices = (await session.scalars(stmt.order_by(Device.name))).all()
+    site_ids = {d.site_id for d in devices}
+    names = dict((await session.execute(select(Site.id, Site.name).where(Site.id.in_(site_ids)))).all()) if site_ids else {}
+    return [DeviceOut.model_validate(d).model_copy(update={"site_name": names.get(d.site_id)}) for d in devices]
 
 
 @router.get("/devices/{device_id}", response_model=DeviceDetail)

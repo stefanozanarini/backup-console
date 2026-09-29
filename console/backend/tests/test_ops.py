@@ -274,6 +274,8 @@ async def test_veeam_licenses(client):
                                          "instances_total": 50, "instances_used": 42})
     await client.post("/agent/v1/veeam", headers=auth, json=report)
     await client.post("/agent/v1/heartbeat", json={"version": "0.2.9"}, headers=auth)
+    [dev] = (await client.get("/api/v1/devices", headers=as_user())).json()
+    assert dev["site_name"] == "Sede"
     [row] = (await client.get("/api/v1/veeam/licenses", headers=as_user())).json()
     assert row["device_id"] == data["device_id"] and row["online"] is True
     assert row["edition"] == "Enterprise" and row["type"] == "Subscription" and row["licensed_to"] == "ACME Srl"

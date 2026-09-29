@@ -59,6 +59,7 @@ export interface Device {
   os_version: string | null;
   last_seen_at: string | null;
   agent: Agent | null;
+  site_name?: string | null;
 }
 
 export interface Volume {
