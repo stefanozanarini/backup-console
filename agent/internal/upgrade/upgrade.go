@@ -170,19 +170,39 @@ func Apply(ctx context.Context, dl Downloader, req Request, opt Options) error {
 		return err
 	}
 	_ = os.Remove(prevPath)
-	if err := os.Rename(exe, prevPath); err != nil {
+	if err := renameRetry(exe, prevPath); err != nil {
 		cleanup()
 		removeMarker(opt.DataDir)
 		return fmt.Errorf("rinomina dell'eseguibile attuale: %w", err)
 	}
-	if err := os.Rename(newPath, exe); err != nil {
-		_ = os.Rename(prevPath, exe)
+	if err := renameRetry(newPath, exe); err != nil {
+		_ = renameRetry(prevPath, exe)
 		cleanup()
 		removeMarker(opt.DataDir)
 		return fmt.Errorf("installazione del nuovo eseguibile: %w", err)
 	}
 	logf("installata la versione %s, riavvio", req.Version)
 	return nil
+}
+
+// Su Windows un file appena eseguito (la prova del nuovo binario) o appena scritto resta
+// bloccato per qualche istante: l'antivirus lo analizza, il processo terminato rilascia
+// l'immagine in ritardo. Riproviamo invece di fallire al primo "file in uso".
+var renameTimeout = 30 * time.Second
+
+func renameRetry(from, to string) error {
+	deadline := time.Now().Add(renameTimeout)
+	wait := 200 * time.Millisecond
+	for {
+		err := os.Rename(from, to)
+		if err == nil || errors.Is(err, os.ErrNotExist) || time.Now().After(deadline) {
+			return err
+		}
+		time.Sleep(wait)
+		if wait < 2*time.Second {
+			wait *= 2
+		}
+	}
 }
 
 func publicKey(allowUnsigned bool) (ed25519.PublicKey, error) {
@@ -271,11 +291,11 @@ func OnStartup(dataDir, running string, logf func(string, ...any)) error {
 	logf("la versione %s non ha completato %d avvii: ripristino %s", m.To, MaxAttempts, m.From)
 	failed := m.Exe + ".failed"
 	_ = os.Remove(failed)
-	if err := os.Rename(m.Exe, failed); err != nil {
+	if err := renameRetry(m.Exe, failed); err != nil {
 		return fmt.Errorf("rollback: %w", err)
 	}
-	if err := os.Rename(prev, m.Exe); err != nil {
-		_ = os.Rename(failed, m.Exe)
+	if err := renameRetry(prev, m.Exe); err != nil {
+		_ = renameRetry(failed, m.Exe)
 		return fmt.Errorf("rollback: %w", err)
 	}
 	m.RolledBack = true

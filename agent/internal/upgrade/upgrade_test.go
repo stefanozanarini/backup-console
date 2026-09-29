@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 type fakeDL struct{ data []byte }
@@ -165,5 +166,27 @@ func TestHealthyUpgradeReportsSuccess(t *testing.T) {
 	out := OnHealthy(e.dir, "0.2.0")
 	if out == nil || out.Type != "agent.upgraded" {
 		t.Fatalf("esito = %+v", out)
+	}
+}
+
+func TestRenameRetry(t *testing.T) {
+	dir := t.TempDir()
+	a, b := filepath.Join(dir, "a"), filepath.Join(dir, "b")
+	start := time.Now()
+	// File inesistente: nessuna attesa inutile.
+	if err := renameRetry(a, b); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("atteso ErrNotExist, ottenuto %v", err)
+	}
+	if time.Since(start) > time.Second {
+		t.Fatal("renameRetry ha atteso su un file inesistente")
+	}
+	if err := os.WriteFile(a, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := renameRetry(a, b); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(b); err != nil {
+		t.Fatal(err)
 	}
 }
