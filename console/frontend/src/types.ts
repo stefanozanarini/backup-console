@@ -135,6 +135,7 @@ export interface VeeamJob {
   transferred_bytes: number | null;
   next_run: string | null;
   updated_at: string;
+  details?: { running?: boolean; running_since?: string | null; progress_pct?: number | null; retries_24h?: number };
   device_name: string;
   tenant_name: string;
 }

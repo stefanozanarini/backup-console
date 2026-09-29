@@ -254,6 +254,7 @@ class VeeamJobOut(ORM):
     transferred_bytes: int | None
     next_run: datetime | None
     updated_at: datetime
+    details: dict[str, Any] = {}
 
 
 class VeeamJobRow(VeeamJobOut):

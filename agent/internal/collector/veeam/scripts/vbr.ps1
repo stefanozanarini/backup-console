@@ -85,21 +85,59 @@ function Test-RetrySession($s) {
     return ([string](Get-Prop $s @('Name', 'JobName'))) -match '\(Retry'
 }
 
+# Storico delle sessioni di un job, dalla più recente. Prima l'API interna per job; se
+# non esiste in questa versione, una sola lettura di tutte le sessioni per l'intero report.
+$script:allSessions = $null
+function Get-JobSessions($jobId, $known) {
+    $list = $null
+    try { $list = @([Veeam.Backup.Core.CBackupSession]::GetByJob([guid]$jobId)) } catch {}
+    if ($null -eq $list) {
+        if ($null -eq $script:allSessions) {
+            $script:allSessions = @{}
+            try {
+                foreach ($s in @(Get-VBRBackupSession)) {
+                    $k = [string]$s.JobId
+                    if (-not $script:allSessions.ContainsKey($k)) { $script:allSessions[$k] = New-Object System.Collections.ArrayList }
+                    [void]$script:allSessions[$k].Add($s)
+                }
+            } catch { Add-CollectorError 'Get-VBRBackupSession' $_ }
+        }
+        $list = @()
+        if ($script:allSessions.ContainsKey([string]$jobId)) { $list = @($script:allSessions[[string]$jobId]) }
+    }
+    $ids = @{}
+    foreach ($s in $list) { if ($s) { $ids[[string]$s.Id] = $true } }
+    foreach ($s in @($known)) { if ($s -and -not $ids.ContainsKey([string]$s.Id)) { $list += $s } }
+    return @($list | Where-Object { $_ } | Sort-Object { [datetime](Get-Prop $_ @('CreationTime')) } -Descending)
+}
+
+function Get-Result($s) { return [string](Get-Prop $s @('Result')) }
+
+# Stati in cui la sessione è ancora in corso (Working, Starting, Stopping, Postprocessing...).
+function Test-Running($s) {
+    $st = [string](Get-Prop $s @('State'))
+    return $st -and $st -notmatch '^(Stopped|Idle|None)$'
+}
+
+function Get-Transferred($s) {
+    if (-not $s) { return $null }
+    $t = Get-Prop (Get-Prop $s @('Progress')) @('TransferedSize', 'TransferredSize')
+    if ($null -ne $t) { return [int64]$t }
+    return $null
+}
+
 # Sessioni delle ultime 24 ore: i retry indicano un problema anche se poi il job è
 # andato a buon fine.
-function Get-RecentSessions($jobId, $last) {
-    $list = @()
-    try { $list = @([Veeam.Backup.Core.CBackupSession]::GetByJob([guid]$jobId)) } catch {
-        if ($last) { $list = @($last) }
-    }
+function Get-RecentSessions($sessions) {
     $out = New-Object System.Collections.ArrayList
-    foreach ($s in @($list | Where-Object { $_ -and $_.CreationTime -ge $recentCut } | Sort-Object CreationTime)) {
+    foreach ($s in @($sessions | Where-Object { [datetime](Get-Prop $_ @('CreationTime')) -ge $recentCut } | Sort-Object { [datetime](Get-Prop $_ @('CreationTime')) })) {
         $reason = $null
         try { $reason = $s.Info.Reason } catch {}
         [void]$out.Add([ordered]@{
-            start = ConvertTo-IsoDate $s.CreationTime
+            start = ConvertTo-IsoDate (Get-Prop $s @('CreationTime'))
             end = ConvertTo-IsoDate (Get-Prop $s @('EndTime'))
-            result = [string](Get-Prop $s @('Result'))
+            result = Get-Result $s
+            state = [string](Get-Prop $s @('State'))
             retry = [bool](Test-RetrySession $s)
             reason = $(if ($reason) { Limit-Text $reason 500 } else { $null })
         })
@@ -108,37 +146,48 @@ function Get-RecentSessions($jobId, $last) {
     return ,$out
 }
 
+# Un job è descritto da tre sessioni diverse:
+#   - l'ultima avviata (può essere ancora in corso: esito "None" finché non termina);
+#   - l'ultima terminata, che dà l'esito, la fine e i messaggi;
+#   - l'ultima riuscita (anche con avvisi: il restore point è stato creato).
 function Add-Job($id, $name, $type, $enabled, $session, $next, $details) {
     if ($seen.ContainsKey($id)) { return }
     $seen[$id] = $true
-    $transferred = $null
-    if ($session) {
-        $progress = Get-Prop $session @('Progress')
-        $t = Get-Prop $progress @('TransferedSize', 'TransferredSize')
-        if ($null -ne $t) { $transferred = [int64]$t }
-    }
     if (-not $details) { $details = [ordered]@{} }
-    if ($session) {
-        $res = [string](Get-Prop $session @('Result'))
-        if ($res -match 'Warning|Failed') {
-            try { $details.messages = Get-SessionMessages $session } catch { Add-CollectorError "messaggi $name" $_ }
-        }
+    $sessions = @()
+    try { $sessions = @(Get-JobSessions $id $session) } catch { Add-CollectorError "sessioni $name" $_; if ($session) { $sessions = @($session) } }
+    $latest = $null; $done = $null; $ok = $null
+    if ($sessions.Count -gt 0) { $latest = $sessions[0] }
+    foreach ($s in $sessions) {
+        $r = Get-Result $s
+        if (-not $done -and $r -match 'Success|Warning|Failed') { $done = $s }
+        if (-not $ok -and $r -match 'Success|Warning') { $ok = $s }
+        if ($done -and $ok) { break }
     }
-    try {
-        $recent = Get-RecentSessions $id $session
-        $details.sessions_24h = $recent
-        $details.retries_24h = @($recent | Where-Object { $_.retry }).Count
-    } catch { Add-CollectorError "sessioni $name" $_ }
+    $running = $latest -and (Test-Running $latest)
+    $details.running = [bool]$running
+    if ($running) {
+        $details.running_since = ConvertTo-IsoDate (Get-Prop $latest @('CreationTime'))
+        $pct = Get-Prop (Get-Prop $latest @('Progress')) @('Percents', 'Percent')
+        if ($null -ne $pct) { $details.progress_pct = [int]$pct }
+    }
+    if ($done -and (Get-Result $done) -match 'Warning|Failed') {
+        try { $details.messages = Get-SessionMessages $done } catch { Add-CollectorError "messaggi $name" $_ }
+    }
+    $recent = Get-RecentSessions $sessions
+    $details.sessions_24h = $recent
+    $details.retries_24h = @($recent | Where-Object { $_.retry }).Count
     [void]$jobs.Add([ordered]@{
         id = [string]$id
         name = [string]$name
         type = [string]$type
         enabled = [bool]$enabled
-        last_result = $(if ($session) { [string](Get-Prop $session @('Result')) } else { $null })
-        last_state = $(if ($session) { [string](Get-Prop $session @('State')) } else { $null })
-        last_start = $(if ($session) { ConvertTo-IsoDate (Get-Prop $session @('CreationTime', 'CreationTimeUTC')) } else { $null })
-        last_end = $(if ($session) { ConvertTo-IsoDate (Get-Prop $session @('EndTime', 'EndTimeUTC')) } else { $null })
-        transferred_bytes = $transferred
+        last_result = $(if ($done) { Get-Result $done } else { $null })
+        last_state = $(if ($latest) { [string](Get-Prop $latest @('State')) } else { $null })
+        last_start = $(if ($latest) { ConvertTo-IsoDate (Get-Prop $latest @('CreationTime', 'CreationTimeUTC')) } else { $null })
+        last_end = $(if ($done) { ConvertTo-IsoDate (Get-Prop $done @('EndTime', 'EndTimeUTC')) } else { $null })
+        last_success = $(if ($ok) { ConvertTo-IsoDate (Get-Prop $ok @('EndTime', 'EndTimeUTC')) } else { $null })
+        transferred_bytes = Get-Transferred $done
         next_run = $next
         details = $details
     })
@@ -163,7 +212,7 @@ try {
         foreach ($j in @(Get-VBRComputerBackupJob)) {
             $s = $null
             try {
-                $s = @(Get-VBRComputerBackupJobSession -Name $j.Name) | Sort-Object CreationTime -Descending | Select-Object -First 1
+                $s = @(Get-VBRComputerBackupJobSession -Name $j.Name)
             } catch {}
             $enabled = Get-Prop $j @('JobEnabled', 'IsEnabled', 'Enabled')
             if ($null -eq $enabled) { $enabled = $true }

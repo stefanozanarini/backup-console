@@ -3,7 +3,7 @@ import { UsageBar } from "./components";
 import { ago, bytes, dateTime } from "./format";
 import type { DeviceDetail, VeeamJob, VeeamResult } from "./types";
 
-export function VeeamResultBadge({ result, enabled = true }: { result: VeeamResult | null; enabled?: boolean }) {
+export function VeeamResultBadge({ result, enabled = true, running = false }: { result: VeeamResult | null; enabled?: boolean; running?: boolean }) {
   if (!enabled) return <span className="badge">Disabilitato</span>;
   switch ((result ?? "None").toLowerCase()) {
     case "success":
@@ -13,8 +13,20 @@ export function VeeamResultBadge({ result, enabled = true }: { result: VeeamResu
     case "failed":
       return <span className="badge critical">Fallito</span>;
     default:
-      return <span className="badge">Mai eseguito</span>;
+      // Primo avvio ancora in corso: basta il badge "In corso".
+      return running ? null : <span className="badge">Mai eseguito</span>;
   }
+}
+
+/** Sessione in corso: l'esito mostrato accanto resta quello dell'ultima sessione terminata. */
+export function VeeamRunningBadge({ job }: { job: VeeamJob }) {
+  if (!job.enabled || !job.details?.running) return null;
+  const pct = job.details.progress_pct;
+  return (
+    <span className="badge" style={{ marginLeft: 4 }} title={job.details.running_since ? `avviato ${dateTime(job.details.running_since)}` : undefined}>
+      In corso{pct != null ? ` ${pct}%` : ""}
+    </span>
+  );
 }
 
 export function VeeamSection({ device }: { device: DeviceDetail }) {
@@ -40,15 +52,15 @@ export function VeeamSection({ device }: { device: DeviceDetail }) {
       <div className="table-wrap">
         <table>
           <thead>
-            <tr><th>Job</th><th>Tipo</th><th>Esito</th><th>Ultima esecuzione</th><th>Ultimo successo</th><th className="num">Trasferiti</th></tr>
+            <tr><th>Job</th><th>Tipo</th><th>Esito</th><th>Ultimo avvio</th><th>Ultimo successo</th><th className="num">Trasferiti</th></tr>
           </thead>
           <tbody>
             {(jobs.data ?? []).map((j) => (
               <tr key={j.id}>
                 <td>{j.name}</td>
                 <td className="muted">{j.job_type ?? "—"}</td>
-                <td><VeeamResultBadge result={j.last_result} enabled={j.enabled} /></td>
-                <td className="nowrap" title={dateTime(j.last_end ?? j.last_start)}>{ago(j.last_end ?? j.last_start)}</td>
+                <td className="nowrap"><VeeamResultBadge result={j.last_result} enabled={j.enabled} running={j.details?.running} /><VeeamRunningBadge job={j} /></td>
+                <td className="nowrap" title={dateTime(j.last_start ?? j.last_end)}>{ago(j.last_start ?? j.last_end)}</td>
                 <td className="nowrap muted" title={dateTime(j.last_success)}>{ago(j.last_success)}</td>
                 <td className="num">{j.transferred_bytes != null ? bytes(j.transferred_bytes) : "—"}</td>
               </tr>

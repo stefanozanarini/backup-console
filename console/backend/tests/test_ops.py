@@ -202,6 +202,17 @@ async def test_veeam_messages_and_retries(client):
     assert (await client.get("/api/v1/problems", headers=as_user())).json() == []
 
 
+async def test_running_job_keeps_last_completed_result(client):
+    data, auth = await approved_agent(client, roles=("veeam_vbr",))
+    # Sessione in corso: l'agente riporta l'esito dell'ultima terminata e l'ultimo successo.
+    running = job("n", "Warning", success_hours_ago=34)
+    running["details"] = {"running": True, "progress_pct": 85}
+    await client.post("/agent/v1/veeam", headers=auth, json=veeam_report([running]))
+    [j] = (await client.get(f"/api/v1/veeam/jobs?device_id={data['device_id']}", headers=as_user())).json()
+    assert j["last_result"] == "Warning" and j["last_success"] is not None
+    assert j["details"]["running"] is True and j["details"]["progress_pct"] == 85
+
+
 async def test_disabled_job_is_ignored(client):
     _, auth = await approved_agent(client, roles=("veeam_vbr",))
     await client.post("/agent/v1/veeam", headers=auth, json=veeam_report([job("x", "Failed", 500, enabled=False)]))
