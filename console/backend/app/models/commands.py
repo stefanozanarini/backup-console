@@ -12,6 +12,8 @@ from app.models.base import Base, UUIDPk, utcnow
 class CommandType(StrEnum):
     EXEC = "exec"  # comando shell/PowerShell
     UPGRADE = "upgrade"  # aggiornamento dell'agente
+    VEEAM_SCAN = "veeam_scan"  # analisi (solo lettura) dei backup eliminabili
+    VEEAM_CLEANUP = "veeam_cleanup"  # eliminazione tramite Veeam dei backup scelti
 
 
 class CommandStatus(StrEnum):
@@ -47,5 +49,7 @@ class Command(UUIDPk, Base):
     error: Mapped[str | None] = mapped_column(String(1000))
     output: Mapped[str] = mapped_column(Text, default="")
     output_truncated: Mapped[bool] = mapped_column(default=False)
+    # Esito strutturato inviato dall'agente (es. elenco dei backup analizzati).
+    result: Mapped[dict[str, Any] | None]
 
     __table_args__ = (Index("ix_commands_agent_status", "agent_id", "status", "created_at"),)

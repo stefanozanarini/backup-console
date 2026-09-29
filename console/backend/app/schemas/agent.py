@@ -148,3 +148,4 @@ class CommandResultIn(BaseModel):
     status: Literal["succeeded", "failed"]
     exit_code: int | None = None
     error: str | None = Field(default=None, max_length=1000)
+    result: dict[str, Any] | None = None

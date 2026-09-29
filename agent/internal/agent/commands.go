@@ -50,6 +50,16 @@ func (a *Agent) commandLoop(ctx context.Context) {
 			}
 		case "upgrade":
 			a.runUpgrade(ctx, cmd)
+		case "veeam_scan", "veeam_cleanup":
+			select {
+			case a.execSlots <- struct{}{}:
+				go func() {
+					defer func() { <-a.execSlots }()
+					a.runVeeamCleanup(ctx, cmd)
+				}()
+			case <-ctx.Done():
+				return
+			}
 		default:
 			a.finish(ctx, cmd.ID, false, nil, "tipo di comando non supportato: "+cmd.Type)
 		}
@@ -76,7 +86,11 @@ func (a *Agent) output(ctx context.Context, id string) remote.Sink {
 // finish comunica l'esito, riprovando qualche volta: se va perso il comando resta
 // "in esecuzione" finché il worker della console non lo marca come timeout.
 func (a *Agent) finish(ctx context.Context, id string, ok bool, exitCode *int, errMsg string) {
-	res := client.CommandResult{Status: "failed", ExitCode: exitCode}
+	a.finishWithResult(ctx, id, ok, exitCode, errMsg, nil)
+}
+
+func (a *Agent) finishWithResult(ctx context.Context, id string, ok bool, exitCode *int, errMsg string, result map[string]any) {
+	res := client.CommandResult{Status: "failed", ExitCode: exitCode, Result: result}
 	if ok {
 		res.Status = "succeeded"
 	}

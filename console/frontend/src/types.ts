@@ -145,8 +145,11 @@ export interface Command {
   id: string;
   tenant_id: string;
   device_id: string;
-  type: "exec" | "upgrade";
-  payload: { command?: string; shell?: string; version?: string; from?: string };
+  type: "exec" | "upgrade" | "veeam_scan" | "veeam_cleanup";
+  payload: {
+    command?: string; shell?: string; version?: string; from?: string;
+    older_than_days?: number; backup_ids?: string[]; total_bytes?: number;
+  };
   status: CommandStatus;
   timeout_s: number;
   reason: string | null;
@@ -161,6 +164,41 @@ export interface Command {
 
 export interface CommandDetail extends Command {
   output: string;
+  result: Record<string, unknown> | null;
+}
+
+export interface VeeamBackupItem {
+  id: string;
+  name: string;
+  job: string | null;
+  state: "active" | "disabled" | "orphan" | "unknown";
+  repository: string | null;
+  restore_points: number;
+  size_bytes: number;
+  first_point: string | null;
+  last_point: string | null;
+  candidate: boolean;
+  beyond_retention?: {
+    retention?: { type: "points" | "days"; value: number } | null;
+    points?: number;
+    size_bytes?: number;
+    chains?: { first_point: string | null; last_point: string | null; points: number; size_bytes: number }[];
+    note?: string | null;
+  } | null;
+}
+
+export interface VeeamScanResult {
+  older_than_days: number;
+  scanned_at?: string;
+  items: VeeamBackupItem[];
+  repositories: VeeamRepository[];
+  errors: string[];
+}
+
+export interface VeeamCleanupResult {
+  results: { id: string; name?: string; status: "deleted" | "skipped" | "missing" | "error"; message?: string; size_bytes?: number }[];
+  repositories: VeeamRepository[];
+  errors: string[];
 }
 
 export interface Release {

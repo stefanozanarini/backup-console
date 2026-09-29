@@ -8,6 +8,7 @@ import CommandPanel from "../CommandPanel";
 import LineChart, { type Series } from "../LineChart";
 import type { DeviceDetail, MetricSeries, Problem, Release } from "../types";
 import { VeeamSection } from "../veeam";
+import VeeamCleanup from "../VeeamCleanup";
 
 const RANGES = [
   { hours: 24, label: "24 ore" },
@@ -134,6 +135,7 @@ export default function DeviceDetailPage() {
       </section>
 
       <VeeamSection device={d} />
+      <VeeamCleanup device={d} writable={writable} />
 
       <section className="card">
         <div className="page-head" style={{ marginBottom: 8 }}>

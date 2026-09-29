@@ -194,6 +194,17 @@ class CommandOut(ORM):
 
 class CommandDetail(CommandOut):
     output: str
+    result: dict[str, Any] | None = None
+
+
+class VeeamCleanupScanIn(BaseModel):
+    # Soglia sull'ultimo restore point; minimo 7 giorni (stessa regola dell'agente).
+    older_than_days: int = Field(30, ge=7, le=3650)
+
+
+class VeeamCleanupIn(BaseModel):
+    scan_id: uuid.UUID
+    backup_ids: list[str] = Field(min_length=1, max_length=500)
 
 
 # --- rilasci e aggiornamenti --------------------------------------------------

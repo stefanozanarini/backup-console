@@ -322,6 +322,8 @@ async def command_output(command_id: uuid.UUID, body: CommandOutputIn, agent: Ap
 async def command_result(command_id: uuid.UUID, body: CommandResultIn, agent: ApprovedAgentDep, session: SessionDep):
     cmd = await _own_command(session, agent, command_id)
     cmd.exit_code, cmd.error = body.exit_code, body.error
+    if body.result is not None:
+        cmd.result = body.result
     if cmd.type == CommandType.UPGRADE and body.status == "succeeded":
         # Binario sostituito: la conferma arriva dall'heartbeat con la nuova versione.
         cmd.status = CommandStatus.RUNNING

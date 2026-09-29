@@ -47,6 +47,8 @@ from app.schemas.ui import (
     TotpSetupOut,
     UpgradeRequest,
     UpgradeResult,
+    VeeamCleanupIn,
+    VeeamCleanupScanIn,
     VeeamJobOut,
     VeeamJobRow,
 )
@@ -368,3 +370,86 @@ async def list_veeam_jobs(
         VeeamJobRow(**VeeamJobOut.model_validate(j).model_dump(), device_name=dn, tenant_name=tn)
         for j, dn, tn in rows
     ]
+
+
+# --- pulizia guidata dei backup Veeam ------------------------------------------
+#
+# 1. analisi (solo lettura): l'agente elenca i backup e marca come eliminabili solo quelli
+#    di job disabilitati o eliminati con l'ultimo restore point più vecchio della soglia;
+# 2. eliminazione (sessione elevata): solo id marcati eliminabili da un'analisi recente
+#    dello stesso dispositivo; l'agente li ricontrolla uno per uno prima di cancellarli.
+
+SCAN_MAX_AGE = timedelta(hours=1)
+
+
+async def _vbr_device(session: AsyncSession, device_id: uuid.UUID, user: CurrentUser) -> Device:
+    device = await _device_with_agent(session, device_id, user)
+    user.require_write(device.tenant_id)
+    if device.agent is None or device.agent.status != AgentStatus.APPROVED:
+        raise HTTPException(status.HTTP_409_CONFLICT, "agente non approvato")
+    if (device.veeam or {}).get("product") != "vbr":
+        raise HTTPException(status.HTTP_409_CONFLICT, "il dispositivo non è un server Veeam Backup & Replication")
+    return device
+
+
+@router.post("/devices/{device_id}/veeam/cleanup-scan", response_model=CommandOut, status_code=201)
+async def veeam_cleanup_scan(
+    device_id: uuid.UUID, body: VeeamCleanupScanIn, user: CurrentUserDep, session: SessionDep, request: Request
+):
+    device = await _vbr_device(session, device_id, user)
+    cmd = Command(
+        tenant_id=device.tenant_id, device_id=device.id, agent_id=device.agent.id, type=CommandType.VEEAM_SCAN,
+        payload={"older_than_days": body.older_than_days}, timeout_s=900,
+        reason=f"analisi backup più vecchi di {body.older_than_days} giorni", created_by=user.id,
+    )
+    session.add(cmd)
+    await session.flush()
+    audit(session, "veeam.cleanup_scan", user_id=user.id, agent_id=device.agent.id, tenant_id=device.tenant_id,
+          target=f"{device.name}:{cmd.id}", ip=client_ip(request), older_than_days=body.older_than_days)
+    await session.commit()
+    return cmd
+
+
+@router.post("/devices/{device_id}/veeam/cleanup", response_model=CommandOut, status_code=201)
+async def veeam_cleanup(
+    device_id: uuid.UUID, body: VeeamCleanupIn, user: CurrentUserDep, elevation: ElevationDep,
+    session: SessionDep, request: Request,
+):
+    device = await _vbr_device(session, device_id, user)
+    if not device.agent.allow_shell:
+        raise HTTPException(status.HTTP_409_CONFLICT, "esecuzione remota disabilitata sul dispositivo")
+    scan = await session.get(Command, body.scan_id)
+    if (
+        scan is None or scan.device_id != device.id or scan.type != CommandType.VEEAM_SCAN
+        or scan.status != CommandStatus.SUCCEEDED or not scan.result
+    ):
+        raise HTTPException(status.HTTP_409_CONFLICT, "analisi non valida per questo dispositivo")
+    if scan.finished_at is None or scan.finished_at < utcnow() - SCAN_MAX_AGE:
+        raise HTTPException(status.HTTP_409_CONFLICT, "analisi troppo vecchia: ripeterla")
+
+    candidates = {
+        str(i.get("id")): i for i in scan.result.get("items", []) if isinstance(i, dict) and i.get("candidate") is True
+    }
+    ids = list(dict.fromkeys(body.backup_ids))  # senza duplicati, ordine preservato
+    not_allowed = [i for i in ids if i not in candidates]
+    if not_allowed:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"backup non eliminabili secondo l'analisi: {', '.join(not_allowed)}")
+
+    items = [
+        {k: candidates[i].get(k) for k in ("id", "name", "job", "state", "repository", "size_bytes", "last_point")}
+        for i in ids
+    ]
+    total = sum(int(it.get("size_bytes") or 0) for it in items)
+    cmd = Command(
+        tenant_id=device.tenant_id, device_id=device.id, agent_id=device.agent.id, type=CommandType.VEEAM_CLEANUP,
+        payload={"older_than_days": scan.payload.get("older_than_days"), "backup_ids": ids, "items": items,
+                 "scan_id": str(scan.id), "total_bytes": total},
+        timeout_s=3600, reason=elevation.reason, created_by=user.id,
+    )
+    session.add(cmd)
+    await session.flush()
+    audit(session, "veeam.cleanup", user_id=user.id, agent_id=device.agent.id, tenant_id=device.tenant_id,
+          target=f"{device.name}:{cmd.id}", ip=client_ip(request), reason=elevation.reason,
+          backups=[it.get("name") for it in items], total_bytes=total)
+    await session.commit()
+    return cmd

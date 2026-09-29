@@ -209,6 +209,8 @@ type CommandResult struct {
 	Status   string  `json:"status"` // succeeded / failed
 	ExitCode *int    `json:"exit_code"`
 	Error    *string `json:"error,omitempty"`
+	// Dati strutturati per i comandi che li producono (es. analisi dei backup Veeam).
+	Result map[string]any `json:"result,omitempty"`
 }
 
 type Event struct {

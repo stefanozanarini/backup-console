@@ -6,7 +6,7 @@ import { useElevation } from "./elevation";
 import { ago, dateTime } from "./format";
 import type { Command, CommandDetail, CommandStatus, DeviceDetail } from "./types";
 
-const FINAL: CommandStatus[] = ["succeeded", "failed", "timeout", "expired"];
+export const FINAL: CommandStatus[] = ["succeeded", "failed", "timeout", "expired"];
 
 export const COMMAND_STATUS_LABEL: Record<CommandStatus, string> = {
   queued: "In coda",
@@ -23,8 +23,21 @@ export function CommandStatusBadge({ status }: { status: CommandStatus }) {
   return <span className={`badge ${cls}`}>{COMMAND_STATUS_LABEL[status]}</span>;
 }
 
+function commandLabel(c: Command): string {
+  switch (c.type) {
+    case "upgrade":
+      return `⟳ aggiornamento ${c.payload.from ?? ""} → ${c.payload.version}`;
+    case "veeam_scan":
+      return `analisi backup Veeam (più vecchi di ${c.payload.older_than_days} giorni)`;
+    case "veeam_cleanup":
+      return `pulizia backup Veeam: ${c.payload.backup_ids?.length ?? 0} backup`;
+    default:
+      return c.payload.command ?? "";
+  }
+}
+
 /** Segue un comando finché non termina (polling ogni secondo). */
-function useCommand(id: string | null) {
+export function useCommand(id: string | null) {
   const [cmd, setCmd] = useState<CommandDetail | null>(null);
   useEffect(() => {
     setCmd(null);
@@ -153,7 +166,7 @@ export default function CommandPanel({ device, writable }: { device: DeviceDetai
             {current.error && <span className="badge critical">{current.error}</span>}
           </div>
           <pre className="terminal mono" ref={out}>
-            <span className="meta">$ {current.type === "upgrade" ? `aggiornamento a ${current.payload.version}` : current.payload.command}{"\n"}</span>
+            <span className="meta">$ {commandLabel(current)}{"\n"}</span>
             {current.output || (FINAL.includes(current.status) ? "" : "in attesa dell'agente…")}
             {current.output_truncated && <span className="meta">{"\n"}[output troncato a 1 MB]</span>}
           </pre>
@@ -172,7 +185,7 @@ export default function CommandPanel({ device, writable }: { device: DeviceDetai
                   <td className="nowrap muted" title={dateTime(c.created_at)}>{ago(c.created_at)}</td>
                   <td>
                     <button className="linklike mono cmdline" onClick={() => setSelected(c.id)} title={c.payload.command}>
-                      {c.type === "upgrade" ? `⟳ aggiornamento ${c.payload.from ?? ""} → ${c.payload.version}` : c.payload.command}
+                      {commandLabel(c)}
                     </button>
                   </td>
                   <td className="muted">{c.reason}</td>
