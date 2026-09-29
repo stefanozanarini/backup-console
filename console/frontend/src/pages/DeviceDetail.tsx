@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, notifyChange, useApi } from "../api";
-import { ConnectivityBadge, Empty, ErrorBox, SeverityBadge, StateBadge, UsageBar } from "../components";
+import { ConnectivityBadge, CopyButton, Empty, ErrorBox, SeverityBadge, StateBadge, UsageBar } from "../components";
 import { useConsole } from "../context";
 import { AGENT_STATUS_LABEL, ago, bytes, connectivity, dateTime, KIND_LABEL } from "../format";
 import CommandPanel from "../CommandPanel";
@@ -77,6 +77,15 @@ export default function DeviceDetailPage() {
             <dt>Hostname</dt><dd>{d.hostname}</dd>
             <dt>Modello</dt><dd>{d.model ?? "—"}</dd>
             <dt>Seriale</dt><dd className="mono">{d.serial ?? "—"}</dd>
+            {d.supremo_id && (
+              <>
+                <dt>ID Supremo</dt>
+                <dd className="form-row" style={{ gap: 8 }}>
+                  <span className="mono">{d.supremo_id.replace(/(\d{3})(?=\d)/g, "$1 ")}</span>
+                  <CopyButton text={d.supremo_id} />
+                </dd>
+              </>
+            )}
             <dt>Sistema</dt><dd>{d.os_version ?? "—"}</dd>
             <dt>Piattaforma</dt><dd>{d.platform} / {d.arch}</dd>
             <dt>Inventario</dt><dd>{ago(d.inventory_at)}</dd>

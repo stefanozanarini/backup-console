@@ -171,6 +171,17 @@ async def test_inventory_updates_device(client):
     device = (await client.get(f"/api/v1/devices/{data['device_id']}", headers=as_user())).json()
     assert device["model"] == "TS-873A" and device["kind"] == "nas"
     assert device["inventory"]["data"]["volumes"][0]["name"] == "DataVol1"
+    assert device["supremo_id"] is None
+
+    # ID di Supremo dall'inventario; un agente vecchio (senza remote_access) non lo cancella.
+    inv = envelope({"data": {"remote_access": {"supremo_id": "431202296"}}})
+    await client.post("/agent/v1/inventory", json=inv, headers=auth)
+    await client.post("/agent/v1/inventory", json=envelope({"data": {}}), headers=auth)
+    [d] = (await client.get("/api/v1/devices", headers=as_user())).json()
+    assert d["supremo_id"] == "431202296"
+    # Supremo disinstallato: remote_access vuoto.
+    await client.post("/agent/v1/inventory", json=envelope({"data": {"remote_access": {}}}), headers=auth)
+    assert (await client.get(f"/api/v1/devices/{data['device_id']}", headers=as_user())).json()["supremo_id"] is None
 
 
 async def test_offline_worker_skips_pcs(client):

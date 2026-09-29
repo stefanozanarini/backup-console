@@ -60,6 +60,7 @@ export interface Device {
   last_seen_at: string | null;
   agent: Agent | null;
   site_name?: string | null;
+  supremo_id?: string | null;
 }
 
 export interface Volume {

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { api, useApi } from "../api";
-import { ErrorBox } from "../components";
+import { CopyButton, ErrorBox } from "../components";
 import { useConsole } from "../context";
 import { dateTime } from "../format";
 import type { EnrollmentToken, Site, Tenant, TokenInfo } from "../types";
@@ -251,22 +251,5 @@ function NewTokenForm(props: { siteId: string; onCancel: () => void; onCreated: 
         <button type="submit" className="btn primary">Genera token</button>
       </div>
     </form>
-  );
-}
-
-function CopyButton({ text }: { text: string }) {
-  const [done, setDone] = useState(false);
-  return (
-    <button
-      className="btn small" type="button"
-      onClick={() => {
-        void navigator.clipboard?.writeText(text).then(() => {
-          setDone(true);
-          window.setTimeout(() => setDone(false), 1500);
-        });
-      }}
-    >
-      {done ? "Copiato" : "Copia"}
-    </button>
   );
 }

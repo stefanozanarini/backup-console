@@ -12,3 +12,11 @@ func TestUsedPctMatchesDf(t *testing.T) {
 		t.Fatal("volume vuoto deve dare 0")
 	}
 }
+
+func TestCleanID(t *testing.T) {
+	for in, want := range map[string]string{"431202296": "431202296", " 431 202 296 ": "431202296", "12": "", "": ""} {
+		if got := cleanID(in); got != want {
+			t.Errorf("cleanID(%q) = %q, atteso %q", in, got, want)
+		}
+	}
+}

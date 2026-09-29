@@ -213,6 +213,11 @@ async def inventory(env: Envelope[InventoryPayload], agent: ApprovedAgentDep, se
     for field in ("model", "serial", "os_version"):
         if (value := getattr(p, field)) is not None:
             setattr(device, field, value[:200])
+    # remote_access c'è solo con agenti che lo rilevano: se manca non tocchiamo il valore.
+    ra = p.data.get("remote_access")
+    if isinstance(ra, dict):
+        sid = ra.get("supremo_id")
+        device.supremo_id = str(sid)[:32] if isinstance(sid, (str, int)) and str(sid).isdigit() else None
     session.add(InventorySnapshot(device_id=device.id, collected_at=env.ts, data=p.model_dump()))
     await session.commit()
     return IngestResponse(accepted=True)

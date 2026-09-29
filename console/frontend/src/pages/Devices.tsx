@@ -19,7 +19,7 @@ export default function Devices() {
   const rows = useMemo(() => {
     const s = search.toLowerCase();
     return (data ?? []).filter(
-      (d) => !s || [d.name, d.hostname, d.model, d.serial].some((v) => v?.toLowerCase().includes(s)),
+      (d) => !s || [d.name, d.hostname, d.model, d.serial, d.supremo_id].some((v) => v?.toLowerCase().includes(s)),
     );
   }, [data, search]);
 
@@ -40,7 +40,7 @@ export default function Devices() {
       </div>
       <div className="filters">
         <input
-          type="search" placeholder="Cerca nome, modello, seriale" value={search}
+          type="search" placeholder="Cerca nome, modello, seriale, ID Supremo" value={search}
           onChange={(e) => setFilter("q", e.target.value)} aria-label="Cerca"
         />
         <select value={tenant} onChange={(e) => setFilter("tenant", e.target.value)} aria-label="Tenant">
@@ -64,6 +64,7 @@ export default function Devices() {
               <th>Tipo</th>
               <th>Tenant</th>
               <th>Sito</th>
+              <th>ID Supremo</th>
               <th>Modello</th>
               <th>Sistema</th>
               <th>Agente</th>
@@ -78,6 +79,7 @@ export default function Devices() {
                 <td>{KIND_LABEL[d.kind]}</td>
                 <td className="nowrap">{tenantName(d.tenant_id)}</td>
                 <td className="nowrap">{d.site_name ?? <span className="muted">—</span>}</td>
+                <td className="mono nowrap">{d.supremo_id ?? <span className="muted">—</span>}</td>
                 <td>{d.model ?? <span className="muted">—</span>}</td>
                 <td>{d.os_version ?? d.platform}</td>
                 <td className="mono">{d.agent?.version ?? "—"}</td>

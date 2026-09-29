@@ -41,14 +41,20 @@ func usedPct(total, free, avail uint64) float64 {
 func (c *Collector) Inventory(ctx context.Context) (collector.Inventory, error) {
 	host, _ := os.Hostname()
 	vols, err := volumes()
+	data := map[string]any{
+		"os":      runtime.GOOS,
+		"arch":    runtime.GOARCH,
+		"volumes": vols,
+	}
+	if ra := remoteAccess(); ra != nil {
+		// Sempre presente su Windows (anche vuoto): la console distingue "non installato"
+		// da "agente che non lo rileva".
+		data["remote_access"] = ra
+	}
 	return collector.Inventory{
 		Hostname:  host,
 		OSVersion: osVersion(),
-		Data: map[string]any{
-			"os":      runtime.GOOS,
-			"arch":    runtime.GOARCH,
-			"volumes": vols,
-		},
+		Data:      data,
 	}, err
 }
 

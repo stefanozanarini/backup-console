@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { ReactNode } from "react";
 import { CONNECTIVITY_LABEL, type Connectivity } from "./format";
 import type { ProblemState, Severity } from "./types";
@@ -75,4 +76,21 @@ export function ErrorBox({ error }: { error: Error | null }) {
 
 export function Empty({ children }: { children: ReactNode }) {
   return <div className="empty">{children}</div>;
+}
+
+export function CopyButton({ text }: { text: string }) {
+  const [done, setDone] = useState(false);
+  return (
+    <button
+      className="btn small" type="button"
+      onClick={() => {
+        void navigator.clipboard?.writeText(text).then(() => {
+          setDone(true);
+          window.setTimeout(() => setDone(false), 1500);
+        });
+      }}
+    >
+      {done ? "Copiato" : "Copia"}
+    </button>
+  );
 }
