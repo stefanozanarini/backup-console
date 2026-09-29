@@ -36,37 +36,74 @@ function Find-Start($ev, $name) {
 # File di backup citati nel log locale del job (C:\ProgramData\Veeam\Endpoint\<job>\Job.<job>.Backup.log):
 # il nome contiene data/ora di creazione e il tipo (.vbk = full, .vib = incrementale).
 # Così non serve accedere alla destinazione, spesso una share con credenziali di Veeam.
+# Dallo stesso log: la dimensione di ogni file ("[Storage] Updating storage '...<file>...',
+# stats 'BackupSize '<byte>'") e lo spazio della destinazione ("[CRepositoryInvestigator]
+# Found directory info: total size '<byte>', free space '<byte>'").
 $logRoot = Join-Path $env:ProgramData 'Veeam\Endpoint'
 $storageCache = @{}
+$targets = [ordered]@{}  # percorso della destinazione → @{ time; total; free }
+function ConvertTo-Bytes($s) { $d = ($s -replace '[^\d]', ''); if ($d) { [int64]$d } else { $null } }
 function Get-Storages($jobName) {
     if ($storageCache.ContainsKey($jobName)) { return $storageCache[$jobName] }
-    $list = New-Object System.Collections.ArrayList
-    $seenFiles = @{}
-    $re = '(?i)' + [regex]::Escape($jobName) + '(\d{4}-\d{2}-\d{2}T\d{6})\.(vbk|vib)\b'
+    $byFile = [ordered]@{}
+    $esc = [regex]::Escape($jobName)
+    $reFile = '(?i)' + $esc + '(\d{4}-\d{2}-\d{2}T\d{6})\.(vbk|vib)\b'
+    $reSize = '(?i)Updating storage .*?' + $esc + '(\d{4}-\d{2}-\d{2}T\d{6})\.(?:vbk|vib)\b.*?BackupSize\s*''?([\d.,]+)'
+    $reDir = "(?i)Found directory info: total size '([\d.,]+)', free space '([\d.,]+)'"
+    $reStat = "(?i)Collecting storage statistic, file '([^']+)'"
+    $lastPath = $null
     try {
         $logs = @(Get-ChildItem $logRoot -Recurse -Filter 'Job.*.log' -ErrorAction Stop |
-            Where-Object { $_.Name -like "*$jobName*" -and $_.LastWriteTime -ge $historyCut.AddDays(-1) })
-        foreach ($m in @($logs | Select-String -Pattern $re -AllMatches)) {
-            foreach ($x in $m.Matches) {
+            Where-Object { $_.Name -like "*$jobName*" -and $_.LastWriteTime -ge $historyCut.AddDays(-1) } |
+            Sort-Object LastWriteTime)
+        $pattern = "$reFile|Found directory info|Collecting storage statistic"
+        foreach ($m in @($logs | Select-String -Pattern $pattern)) {
+            $line = $m.Line
+            if ($line -match $reStat) { $lastPath = $Matches[1] }
+            if ($line -match $reDir) {
+                $total = ConvertTo-Bytes $Matches[1]; $free = ConvertTo-Bytes $Matches[2]
+                # La destinazione è la cartella che contiene quella del job.
+                $dest = $(if ($lastPath) { Split-Path (Split-Path $lastPath -Parent) -Parent } else { "destinazione di $jobName" })
+                if ($total) { $targets[$dest] = @{ total = $total; free = $free } }
+            }
+            $size = $null
+            if ($line -match $reSize) { $size = ConvertTo-Bytes $Matches[2] }
+            foreach ($x in [regex]::Matches($line, $reFile)) {
                 $key = $x.Value.ToLowerInvariant()
-                if ($seenFiles.ContainsKey($key)) { continue }
-                $seenFiles[$key] = $true
-                try {
-                    $t = [datetime]::ParseExact($x.Groups[1].Value, 'yyyy-MM-ddTHHmmss', [Globalization.CultureInfo]::InvariantCulture)
-                    [void]$list.Add(@{ time = $t; full = ($x.Groups[2].Value -ieq 'vbk') })
-                } catch {}
+                if (-not $byFile.Contains($key)) {
+                    try {
+                        $t = [datetime]::ParseExact($x.Groups[1].Value, 'yyyy-MM-ddTHHmmss', [Globalization.CultureInfo]::InvariantCulture)
+                        $byFile[$key] = @{ time = $t; full = ($x.Groups[2].Value -ieq 'vbk'); size = $null }
+                    } catch { continue }
+                }
+            }
+            if ($null -ne $size) {
+                $k = ($jobName + $Matches[1] + '.').ToLowerInvariant()
+                foreach ($key in @($byFile.Keys)) { if ($key.StartsWith($k)) { $byFile[$key].size = $size } }
             }
         }
     } catch {}
+    $list = @($byFile.Values)
     $storageCache[$jobName] = $list
     return $list
 }
 
-# Full o incrementale: il file creato durante la sessione (tra avvio e fine).
-function Get-Mode($jobName, $ev, $st) {
+function Get-SessionStorages($jobName, $ev, $st) {
     $to = $ev.TimeCreated.AddMinutes(1)
     $from = $(if ($st) { $st.TimeCreated.AddMinutes(-1) } else { $ev.TimeCreated.AddHours(-12) })
-    $found = @(Get-Storages $jobName | Where-Object { $_.time -ge $from -and $_.time -le $to })
+    return @(Get-Storages $jobName | Where-Object { $_.time -ge $from -and $_.time -le $to })
+}
+
+# Dimensione del file creato dalla sessione (somma, se più di uno).
+function Get-BackupBytes($jobName, $ev, $st) {
+    $sizes = @(Get-SessionStorages $jobName $ev $st | Where-Object { $null -ne $_.size } | ForEach-Object { $_.size })
+    if ($sizes.Count -eq 0) { return $null }
+    return [int64](($sizes | Measure-Object -Sum).Sum)
+}
+
+# Full o incrementale: il file creato durante la sessione (tra avvio e fine).
+function Get-Mode($jobName, $ev, $st) {
+    $found = @(Get-SessionStorages $jobName $ev $st)
     if ($found.Count -eq 0) { return $null }
     if (@($found | Where-Object { $_.full }).Count -gt 0) { return 'full' }
     return 'incremental'
@@ -117,6 +154,7 @@ foreach ($ev in ($events | Sort-Object TimeCreated -Descending)) {
         start = $(if ($st) { ConvertTo-IsoDate $st.TimeCreated } else { $null })
         end = ConvertTo-IsoDate $ev.TimeCreated
         mode = Get-Mode $name $ev $st
+        backup_bytes = Get-BackupBytes $name $ev $st
         result = Get-Result $ev
         state = 'Stopped'
         retry = $retry
@@ -155,5 +193,9 @@ foreach ($name in $byJob.Keys) {
 }
 if ($events.Count -eq 0) { [void]$script:errors.Add('nessuna sessione trovata nell''Event Log') }
 $out.jobs = $jobs
+# Destinazioni viste nei log dei job, con lo spazio dell'ultima rilevazione.
+$repos = New-Object System.Collections.ArrayList
+foreach ($k in $targets.Keys) { [void]$repos.Add([ordered]@{ name = [string]$k; type = 'VeeamAgentTarget'; total_bytes = $targets[$k].total; free_bytes = $targets[$k].free }) }
+$out.repositories = $repos
 $out.errors = $script:errors
 $out | ConvertTo-Json -Depth 8 -Compress

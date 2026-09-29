@@ -277,6 +277,7 @@ class VeeamSessionOut(ORM):
     mode: str | None
     retry: bool
     transferred_bytes: int | None
+    backup_bytes: int | None
     reason: str | None
 
 

@@ -128,6 +128,7 @@ export interface VeeamSession {
   retry?: boolean;
   mode?: "full" | "incremental" | null;
   transferred_bytes?: number | null;
+  backup_bytes?: number | null;
   reason?: string | null;
 }
 

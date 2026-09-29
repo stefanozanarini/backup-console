@@ -59,5 +59,6 @@ class VeeamSession(Base):
     mode: Mapped[str | None] = mapped_column(String(16))  # full / incremental
     retry: Mapped[bool] = mapped_column(default=False)
     transferred_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    backup_bytes: Mapped[int | None] = mapped_column(BigInteger)  # dimensione dei file creati
     reason: Mapped[str | None] = mapped_column(Text)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow)

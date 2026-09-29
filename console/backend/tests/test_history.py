@@ -27,7 +27,7 @@ async def test_veeam_sessions_are_kept(client):
     j = job("a", "Success")
     j["details"] = {"history": [
         session("s3", 1, "None", state="Working"),
-        session("s2", 25, "Warning", mode="incremental", transferred_bytes=5 << 30, reason="lento"),
+        session("s2", 25, "Warning", mode="incremental", transferred_bytes=5 << 30, backup_bytes=3 << 30, reason="lento"),
         session("s1", 49, "Failed", retry=True),
     ]}
     await client.post("/agent/v1/veeam", headers=auth, json=veeam_report([j]))
@@ -37,6 +37,7 @@ async def test_veeam_sessions_are_kept(client):
     rows = r.json()
     assert [s["result"] for s in rows] == ["None", "Warning", "Failed"]
     assert rows[1]["mode"] == "incremental" and rows[1]["transferred_bytes"] == 5 << 30 and rows[2]["retry"]
+    assert rows[1]["backup_bytes"] == 3 << 30
 
     # La sessione in corso termina: stessa riga aggiornata.
     j["details"]["history"][0] = session("s3", 1, "Success", mode="full")

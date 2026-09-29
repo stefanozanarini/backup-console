@@ -170,6 +170,13 @@ function Get-RecentSessions($sessions) {
     return ,$out
 }
 
+# Dimensione dei file creati dalla sessione (statistiche Veeam della sessione).
+function Get-BackupBytes($s) {
+    $v = Get-Prop (Get-Prop $s @('BackupStats')) @('BackupSize')
+    if ($null -ne $v -and [int64]$v -gt 0) { return [int64]$v }
+    return $null
+}
+
 # Full o incrementale; $null se la versione di Veeam non lo espone.
 function Get-SessionMode($s) {
     $f = Get-Prop $s @('IsFullMode', 'IsActiveFullMode')
@@ -195,6 +202,7 @@ function Get-History($sessions) {
             retry = [bool](Test-RetrySession $s)
             mode = Get-SessionMode $s
             transferred_bytes = Get-Transferred $s
+            backup_bytes = Get-BackupBytes $s
             reason = $(if ($reason) { Limit-Text $reason 300 } else { $null })
         })
         if ($out.Count -ge 150) { break }

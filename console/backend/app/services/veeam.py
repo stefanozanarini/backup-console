@@ -57,6 +57,7 @@ def _session_rows(device: Device, product: str, job_key: str, job_name: str,
         if not key or (start is None and end is None):
             continue
         transferred = e.get("transferred_bytes")
+        size = e.get("backup_bytes")
         rows.append({
             "tenant_id": device.tenant_id, "device_id": device.id, "product": product,
             "job_key": job_key, "job_name": job_name[:300], "session_key": str(key)[:100],
@@ -66,13 +67,15 @@ def _session_rows(device: Device, product: str, job_key: str, job_name: str,
             "mode": e.get("mode") if e.get("mode") in ("full", "incremental") else None,
             "retry": bool(e.get("retry")),
             "transferred_bytes": transferred if isinstance(transferred, int) else None,
+            "backup_bytes": size if isinstance(size, int) and size >= 0 else None,
             "reason": (str(e["reason"])[:2000] if e.get("reason") else None),
             "updated_at": now,
         })
     return rows
 
 
-UPDATABLE = ("job_name", "started_at", "ended_at", "result", "state", "mode", "retry", "transferred_bytes", "reason")
+UPDATABLE = ("job_name", "started_at", "ended_at", "result", "state", "mode", "retry", "transferred_bytes",
+             "backup_bytes", "reason")
 
 
 async def _store_sessions(session: AsyncSession, rows: list[dict[str, Any]]) -> None:

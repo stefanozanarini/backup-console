@@ -91,7 +91,8 @@ const PERIODS = [10, 30, 90, 365];
 
 interface StoredSession {
   started_at: string | null; ended_at: string | null; result: string | null; state: string | null;
-  mode: "full" | "incremental" | null; retry: boolean; transferred_bytes: number | null; reason: string | null;
+  mode: "full" | "incremental" | null; retry: boolean; transferred_bytes: number | null; backup_bytes: number | null;
+  reason: string | null;
 }
 
 /** Sessioni salvate in console: restano anche dopo che Veeam le ha cancellate. */
@@ -104,9 +105,12 @@ export function HistoryTable({ job }: { job: VeeamJob }) {
   const history: VeeamSession[] = stored.data && stored.data.length > 0
     ? stored.data.map((s) => ({
       start: s.started_at, end: s.ended_at, result: s.result, state: s.state, mode: s.mode,
-      retry: s.retry, transferred_bytes: s.transferred_bytes, reason: s.reason,
+      retry: s.retry, transferred_bytes: s.transferred_bytes, backup_bytes: s.backup_bytes, reason: s.reason,
     }))
     : stored.data ? job.details?.history ?? [] : [];
+  // Veeam Agent non riporta i dati trasferiti: la colonna compare solo se c'è qualcosa.
+  const showTransferred = history.some((s) => s.transferred_bytes != null);
+  const totalSize = history.reduce((a, s) => a + (s.backup_bytes ?? 0), 0);
   const counts = history.reduce((c, s) => ({ ...c, [level(s)]: (c[level(s)] ?? 0) + 1 }), {} as Record<string, number>);
   return (
     <div className="stack" style={{ gap: 8 }}>
@@ -117,6 +121,7 @@ export function HistoryTable({ job }: { job: VeeamJob }) {
         {history.length > 0 && (
           <span className="muted">
             {history.length} sessioni · {counts.success ?? 0} riuscite · {counts.warning ?? 0} con avvisi · {counts.failed ?? 0} fallite
+            {totalSize > 0 && <> · {bytes(totalSize)} di backup creati</>}
           </span>
         )}
       </div>
@@ -127,7 +132,7 @@ export function HistoryTable({ job }: { job: VeeamJob }) {
       ) : (
     <table className="compact">
       <thead>
-        <tr><th>Avvio</th><th>Fine</th><th>Durata</th><th>Tipo</th><th>Esito</th><th className="num">Trasferiti</th><th>Note</th></tr>
+        <tr><th>Avvio</th><th>Fine</th><th>Durata</th><th>Tipo</th><th>Esito</th><th className="num">Dimensione</th>{showTransferred && <th className="num">Trasferiti</th>}<th>Note</th></tr>
       </thead>
       <tbody>
         {history.map((s, i) => (
@@ -141,7 +146,8 @@ export function HistoryTable({ job }: { job: VeeamJob }) {
               {level(s) === "none" && s.state && s.state !== "Stopped" && <span className="badge">In corso</span>}
               {s.retry && <span className="chip" style={{ marginLeft: 4 }}>retry</span>}
             </td>
-            <td className="num nowrap">{s.transferred_bytes != null ? bytes(s.transferred_bytes) : "—"}</td>
+            <td className="num nowrap">{s.backup_bytes != null ? bytes(s.backup_bytes) : "—"}</td>
+            {showTransferred && <td className="num nowrap">{s.transferred_bytes != null ? bytes(s.transferred_bytes) : "—"}</td>}
             <td className="small">{s.reason ?? ""}</td>
           </tr>
         ))}
