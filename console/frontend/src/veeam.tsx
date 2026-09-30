@@ -162,7 +162,7 @@ export function HistoryTable({ job, writable = false }: { job: VeeamJob; writabl
   const counts = history.reduce((c, s) => ({ ...c, [level(s)]: (c[level(s)] ?? 0) + 1 }), {} as Record<string, number>);
   return (
     <div className="stack" style={{ gap: 8 }}>
-      {writable && job.enabled && (
+      {writable && job.enabled && job.product !== "uranium" && (
         <JobStartButton deviceId={job.device_id} jobKey={job.job_key} jobName={job.name} product={job.product}
           lastResult={job.last_result} running={job.details?.running} />
       )}
@@ -210,34 +210,17 @@ export function HistoryTable({ job, writable = false }: { job: VeeamJob; writabl
   );
 }
 
-export function VeeamSection({ device, writable = false }: { device: DeviceDetail; writable?: boolean }) {
-  const v = device.veeam;
-  const jobs = useApi<VeeamJob[]>(v.product ? `/veeam/jobs?device_id=${device.id}` : null, 60000);
+/** Tabella dei job di un dispositivo: riga espandibile con storico e rilancio. */
+function JobsTable({ jobs, writable }: { jobs: VeeamJob[] | undefined; writable: boolean }) {
   const [open, setOpen] = useState<string | null>(null);
-  if (!v.product) return null;
-  const repos = (v.repositories ?? []).filter((r) => r.total_bytes);
-
   return (
-    <section className="card">
-      <div className="page-head" style={{ marginBottom: 8 }}>
-        <h2 style={{ margin: 0 }}>
-          {v.product === "vbr" ? "Veeam Backup & Replication" : "Veeam Agent for Windows"}
-          {v.version && <span className="chip mono" style={{ marginLeft: 8 }}>{v.version}</span>}
-        </h2>
-        <span className="muted" style={{ fontSize: 12.5 }}>report {ago(v.reported_at)}</span>
-      </div>
-      {(v.errors ?? []).length > 0 && (
-        <div className="notice" style={{ marginBottom: 12 }}>
-          Il collector ha segnalato: {v.errors!.join(" · ")}
-        </div>
-      )}
       <div className="table-wrap">
         <table>
           <thead>
             <tr><th>Job</th><th>Tipo</th><th>Esito</th><th>Ultimi {HISTORY_DAYS} giorni</th><th>Ultimo avvio</th><th>Ultimo successo</th><th className="num">Trasferiti</th></tr>
           </thead>
           <tbody>
-            {(jobs.data ?? []).map((j) => (
+            {(jobs ?? []).map((j) => (
               <Fragment key={j.id}>
               <tr className={`clickable ${open === j.id ? "expanded" : ""}`} aria-expanded={open === j.id}
                 onClick={() => setOpen(open === j.id ? null : j.id)}>
@@ -258,8 +241,60 @@ export function VeeamSection({ device, writable = false }: { device: DeviceDetai
             ))}
           </tbody>
         </table>
-        {jobs.data?.length === 0 && <div className="empty">Nessun job</div>}
+        {jobs?.length === 0 && <div className="empty">Nessun job</div>}
       </div>
+  );
+}
+
+/** Uranium Backup: backup set con esito e storico, come i job Veeam. */
+export function UraniumSection({ device }: { device: DeviceDetail }) {
+  const u = device.uranium;
+  const jobs = useApi<VeeamJob[]>(u ? `/veeam/jobs?device_id=${device.id}` : null, 60000);
+  if (!u) return null;
+  return (
+    <section className="card">
+      <div className="page-head" style={{ marginBottom: 8 }}>
+        <h2 style={{ margin: 0 }}>
+          Uranium Backup
+          {u.version && <span className="chip mono" style={{ marginLeft: 8 }}>{u.version}</span>}
+        </h2>
+        <span className="muted" style={{ fontSize: 12.5 }}>report {ago(u.reported_at)}</span>
+      </div>
+      {u.service && !u.service.installed && (
+        <div className="notice" style={{ marginBottom: 12 }}>
+          Servizio di Uranium non installato: i backup pianificati partono solo mentre un utente è collegato con
+          Uranium Backup aperto (dopo un riavvio, senza accesso, non partono).
+        </div>
+      )}
+      {(u.errors ?? []).length > 0 && (
+        <div className="notice" style={{ marginBottom: 12 }}>Il collector ha segnalato: {u.errors!.join(" · ")}</div>
+      )}
+      <JobsTable jobs={jobs.data?.filter((j) => j.product === "uranium")} writable={false} />
+    </section>
+  );
+}
+
+export function VeeamSection({ device, writable = false }: { device: DeviceDetail; writable?: boolean }) {
+  const v = device.veeam;
+  const jobs = useApi<VeeamJob[]>(v.product ? `/veeam/jobs?device_id=${device.id}` : null, 60000);
+  if (!v.product) return null;
+  const repos = (v.repositories ?? []).filter((r) => r.total_bytes);
+
+  return (
+    <section className="card">
+      <div className="page-head" style={{ marginBottom: 8 }}>
+        <h2 style={{ margin: 0 }}>
+          {v.product === "vbr" ? "Veeam Backup & Replication" : "Veeam Agent for Windows"}
+          {v.version && <span className="chip mono" style={{ marginLeft: 8 }}>{v.version}</span>}
+        </h2>
+        <span className="muted" style={{ fontSize: 12.5 }}>report {ago(v.reported_at)}</span>
+      </div>
+      {(v.errors ?? []).length > 0 && (
+        <div className="notice" style={{ marginBottom: 12 }}>
+          Il collector ha segnalato: {v.errors!.join(" · ")}
+        </div>
+      )}
+      <JobsTable jobs={jobs.data?.filter((j) => j.product !== "uranium")} writable={writable} />
 
       {(repos.length > 0 || v.license) && (
         <div className="grid-2" style={{ marginTop: 16, marginBottom: 0 }}>

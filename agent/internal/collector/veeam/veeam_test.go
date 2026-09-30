@@ -91,3 +91,22 @@ func TestReportFallsBackToBasic(t *testing.T) {
 		t.Fatal("atteso errore")
 	}
 }
+
+func TestUraniumEndpointAndName(t *testing.T) {
+	c := NewUranium()
+	c.detect = func() bool { return true }
+	c.run = func(context.Context, string) ([]byte, error) {
+		return []byte(`{"product":"uranium","jobs":[{"id":"uranium:BkpSet00.bks","name":"salvat","enabled":true,"last_result":"Warning"}],"errors":[],"service":{"installed":false}}`), nil
+	}
+	path, payload, err := c.Report(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := payload.(Payload)
+	if path != "/agent/v1/uranium" || c.Name() != "uranium" || c.Role() != "uranium" || p.Product != "uranium" {
+		t.Fatalf("path=%s name=%s role=%s product=%s", path, c.Name(), c.Role(), p.Product)
+	}
+	if p.Service["installed"] != false || p.Jobs[0].LastResult != "Warning" {
+		t.Fatalf("payload %+v", p)
+	}
+}

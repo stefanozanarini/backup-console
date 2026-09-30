@@ -36,7 +36,7 @@ type Reporter interface {
 
 // Detect ritorna i collector attivi su questa macchina.
 func Detect() []collector.Collector {
-	all := []collector.Collector{qnap.New(), veeam.NewVBR(), veeam.NewVAW(), system.New()}
+	all := []collector.Collector{qnap.New(), veeam.NewVBR(), veeam.NewVAW(), veeam.NewUranium(), system.New()}
 	var out []collector.Collector
 	for _, c := range all {
 		if c.Detect() {

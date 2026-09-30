@@ -157,7 +157,7 @@ function ProblemDetails({ problem, writable }: { problem: Problem; writable: boo
   const jobKey = typeof d.job_key === "string" ? d.job_key : null;
   return (
     <div className="problem-details">
-      {writable && jobKey && JOB_CHECKS.has(problem.check) && problem.state === "open" && (
+      {writable && jobKey && !jobKey.startsWith("uranium:") && JOB_CHECKS.has(problem.check) && problem.state === "open" && (
         <JobStartButton deviceId={problem.device_id} jobKey={jobKey} jobName={String(d.job ?? "")}
           product={jobKey.startsWith("vaw:") ? "vaw" : "vbr"} lastResult={typeof d.result === "string" ? d.result : null} />
       )}

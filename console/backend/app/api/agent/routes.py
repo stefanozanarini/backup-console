@@ -255,7 +255,7 @@ async def metrics(env: Envelope[MetricsPayload], agent: ApprovedAgentDep, sessio
     return IngestResponse(accepted=True)
 
 
-COLLECTOR_LABELS = {"veeam_vbr": "Veeam B&R", "veeam_vaw": "Veeam Agent"}
+COLLECTOR_LABELS = {"veeam_vbr": "Veeam B&R", "veeam_vaw": "Veeam Agent", "uranium": "Uranium Backup"}
 
 
 @router.post("/events", response_model=IngestResponse)
@@ -286,10 +286,24 @@ async def events(env: Envelope[EventsPayload], agent: ApprovedAgentDep, session:
     return IngestResponse(accepted=True)
 
 
+@router.post("/uranium", response_model=IngestResponse)
+async def uranium(env: Envelope[VeeamPayload], agent: ApprovedAgentDep, session: SessionDep):
+    """Uranium Backup: stesso formato e stessi controlli dei job Veeam."""
+    if not await _first_delivery(session, agent, env.msg_id, "uranium"):
+        return IngestResponse(accepted=True, duplicate=True)
+    if env.payload.product != "uranium":
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "prodotto non valido per questo endpoint")
+    await veeam_service.ingest(session, agent.device, env.payload, env.ts)
+    await session.commit()
+    return IngestResponse(accepted=True)
+
+
 @router.post("/veeam", response_model=IngestResponse)
 async def veeam(env: Envelope[VeeamPayload], agent: ApprovedAgentDep, session: SessionDep):
     if not await _first_delivery(session, agent, env.msg_id, "veeam"):
         return IngestResponse(accepted=True, duplicate=True)
+    if env.payload.product == "uranium":
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Uranium va inviato a /agent/v1/uranium")
     await veeam_service.ingest(session, agent.device, env.payload, env.ts)
     await session.commit()
     return IngestResponse(accepted=True)

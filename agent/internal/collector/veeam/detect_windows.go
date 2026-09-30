@@ -7,7 +7,9 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"unicode/utf16"
 
@@ -28,6 +30,22 @@ func detectVBR() bool { return serviceInstalled("VeeamBackupSvc") }
 // Veeam Agent standalone: il servizio esiste anche quando l'agente è gestito da VBR;
 // su un server VBR lo ignoriamo (i suoi job arrivano già dal collector VBR).
 func detectVAW() bool { return serviceInstalled("VeeamEndpointBackupSvc") && !detectVBR() }
+
+// Uranium Backup: la cartella dei log in ProgramData (c'è anche senza il servizio, che
+// nella versione Free non esiste) o l'eseguibile installato.
+func detectUranium() bool {
+	if fi, err := os.Stat(filepath.Join(os.Getenv("ProgramData"), "UraniumBackup", "Log")); err == nil && fi.IsDir() {
+		return true
+	}
+	for _, env := range []string{"ProgramFiles(x86)", "ProgramFiles"} {
+		if base := os.Getenv(env); base != "" {
+			if _, err := os.Stat(filepath.Join(base, "Uranium Backup", "Uranium.exe")); err == nil {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 func encodePS(script string) string {
 	u := utf16.Encode([]rune(script))

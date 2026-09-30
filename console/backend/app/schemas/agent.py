@@ -2,12 +2,15 @@
 
 import uuid
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
 Platform = Literal["linux", "windows"]
-AgentRole = Literal["qnap", "qnap_hero", "veeam_vbr", "veeam_agent", "system"]
+# Ruoli noti: qnap, qnap_hero, veeam_vbr, veeam_agent, uranium, system. Si accetta qualsiasi
+# nome ben formato: un agente più nuovo della console (nuovo prodotto rilevato) non deve
+# vedersi rifiutare heartbeat ed enrollment.
+AgentRole = Annotated[str, Field(pattern=r"^[a-z0-9_]{1,32}$")]
 
 
 class EnrollRequest(BaseModel):
@@ -17,7 +20,7 @@ class EnrollRequest(BaseModel):
     platform: Platform
     arch: str = Field(max_length=32)
     agent_version: str = Field(max_length=64)
-    roles: list[AgentRole] = []
+    roles: list[AgentRole] = Field(default=[], max_length=20)
     # Esecuzione remota: abilitata di default, disattivabile solo in installazione.
     allow_shell: bool = True
 
@@ -32,7 +35,7 @@ class EnrollResponse(BaseModel):
 
 class HeartbeatRequest(BaseModel):
     version: str = Field(max_length=64)
-    roles: list[AgentRole] = []
+    roles: list[AgentRole] = Field(default=[], max_length=20)
     capabilities: dict[str, Any] = {}
     allow_shell: bool = False
     uptime_s: int | None = None
@@ -130,12 +133,14 @@ class VeeamLicenseIn(BaseModel):
 
 
 class VeeamPayload(BaseModel):
-    product: Literal["vbr", "vaw"]
+    # vbr / vaw su /agent/v1/veeam; uranium (Uranium Backup) su /agent/v1/uranium.
+    product: Literal["vbr", "vaw", "uranium"]
     version: str | None = Field(default=None, max_length=64)
     jobs: list[VeeamJobIn] = Field(default=[], max_length=2000)
     repositories: list[VeeamRepositoryIn] = Field(default=[], max_length=500)
     license: VeeamLicenseIn | None = None
     errors: list[str] = Field(default=[], max_length=50)  # errori non fatali del collector
+    service: dict[str, Any] | None = None  # solo Uranium: servizio Windows installato e stato
 
 
 # --- comandi e aggiornamenti ------------------------------------------------

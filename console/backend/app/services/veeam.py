@@ -136,6 +136,14 @@ async def ingest(session: AsyncSession, device: Device, p: VeeamPayload, ts: dat
                 await resolve_problem(session, device.id, check, {"job": key})
             await session.execute(delete(VeeamJob).where(VeeamJob.id == row.id))
 
+    if p.product == "uranium":
+        # Niente repository né licenza; i dati Veeam del dispositivo restano come sono.
+        await resolve_problem(session, device.id, "agent.collector", {"collector": "uranium"})
+        device.uranium = {
+            "version": p.version, "service": p.service, "errors": p.errors, "reported_at": ts.isoformat(),
+        }
+        return
+
     # Repository: stesse soglie a cascata dei volumi.
     metrics = []
     for r in p.repositories:
@@ -200,6 +208,12 @@ async def _evaluate_job(session: AsyncSession, device: Device, job: VeeamJob, no
         return
     age_h = (now - job.last_success.astimezone(UTC)).total_seconds() / 3600
     warn, crit = limits
+    # Job che non girano ogni giorno (es. settimanali): l'agente riporta l'intervallo
+    # abituale tra le esecuzioni e la soglia si adatta, così non si segnala ogni settimana.
+    expected = (job.details or {}).get("expected_interval_h")
+    if isinstance(expected, (int, float)) and expected > 0:
+        warn = max(warn, expected * 1.5) if warn is not None else None
+        crit = max(crit, expected * 2.5) if crit is not None else None
     sev = Severity.CRITICAL if crit is not None and age_h >= crit else Severity.WARNING if warn is not None and age_h >= warn else None
     if sev is None:
         await resolve_problem(session, device.id, "veeam.last_success_age_h", labels)

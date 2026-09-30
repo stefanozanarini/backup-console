@@ -24,6 +24,9 @@ var vbrPS string
 //go:embed scripts/vaw.ps1
 var vawPS string
 
+//go:embed scripts/uranium.ps1
+var uraniumPS string
+
 type Job struct {
 	ID               string         `json:"id"`
 	Name             string         `json:"name"`
@@ -66,6 +69,8 @@ type Payload struct {
 	Repositories []Repository `json:"repositories"`
 	License      *License     `json:"license,omitempty"`
 	Errors       []string     `json:"errors"`
+	// Solo Uranium Backup: presenza e stato del servizio Windows.
+	Service map[string]any `json:"service,omitempty"`
 }
 
 // Parse legge l'output JSON degli script e normalizza gli esiti.
@@ -125,11 +130,29 @@ func NewVBR() *Collector {
 	return &Collector{product: "vbr", role: "veeam_vbr", script: vbrPS, detect: detectVBR, run: runPowerShell}
 }
 
+// NewUranium: Uranium Backup (NanoSystems), riportato come i prodotti Veeam ma su un
+// endpoint proprio (la console lo tiene separato dai dati Veeam del dispositivo).
+func NewUranium() *Collector {
+	return &Collector{product: "uranium", role: "uranium", script: uraniumPS, detect: detectUranium, run: runPowerShell}
+}
+
 func NewVAW() *Collector {
 	return &Collector{product: "vaw", role: "veeam_agent", script: vawPS, detect: detectVAW, run: runPowerShell}
 }
 
-func (c *Collector) Name() string { return "veeam_" + c.product }
+func (c *Collector) Name() string {
+	if c.product == "uranium" {
+		return "uranium"
+	}
+	return "veeam_" + c.product
+}
+
+func (c *Collector) endpoint() string {
+	if c.product == "uranium" {
+		return "/agent/v1/uranium"
+	}
+	return "/agent/v1/veeam"
+}
 func (c *Collector) Role() string { return c.role }
 func (c *Collector) Detect() bool { return c.detect() }
 
@@ -174,7 +197,7 @@ func (c *Collector) Report(ctx context.Context) (string, any, error) {
 	c.mu.Lock()
 	c.last = &p
 	c.mu.Unlock()
-	return "/agent/v1/veeam", p, nil
+	return c.endpoint(), p, nil
 }
 
 func (c *Collector) collect(ctx context.Context, timeout time.Duration, prelude string) (Payload, error) {

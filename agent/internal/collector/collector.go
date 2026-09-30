@@ -39,7 +39,7 @@ func NewMetric(name string, value float64, labels map[string]string) Metric {
 // Data viene raccolta per nome del collector.
 func Merge(parts map[string]Inventory) Inventory {
 	out := Inventory{Data: map[string]any{}}
-	for _, name := range []string{"qnap", "veeam_vbr", "veeam_vaw", "system"} {
+	for _, name := range []string{"qnap", "veeam_vbr", "veeam_vaw", "uranium", "system"} {
 		p, ok := parts[name]
 		if !ok {
 			continue

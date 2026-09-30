@@ -111,7 +111,7 @@ function Sidebar() {
         )}
       </NavLink>
       <NavLink to="/dispositivi" className="nav-link">Dispositivi</NavLink>
-      <NavLink to="/backup" className="nav-link">Backup Veeam</NavLink>
+      <NavLink to="/backup" className="nav-link">Backup</NavLink>
       <NavLink to="/licenze" className="nav-link">Licenze Veeam</NavLink>
       <NavLink to="/approvazioni" className="nav-link">
         Approvazioni

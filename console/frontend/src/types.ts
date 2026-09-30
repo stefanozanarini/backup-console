@@ -114,10 +114,18 @@ export interface VeeamStatus {
   reported_at?: string;
 }
 
+export interface UraniumStatus {
+  version?: string | null;
+  service?: { installed: boolean; status: string | null } | null;
+  errors?: string[];
+  reported_at?: string;
+}
+
 export interface DeviceDetail extends Device {
   inventory: Inventory | null;
   inventory_at: string | null;
   veeam: VeeamStatus;
+  uranium?: UraniumStatus | null;
 }
 
 export type VeeamResult = "Success" | "Warning" | "Failed" | "None" | string;
@@ -138,7 +146,7 @@ export interface VeeamJob {
   id: string;
   tenant_id: string;
   device_id: string;
-  product: "vbr" | "vaw";
+  product: "vbr" | "vaw" | "uranium";
   job_key: string;
   name: string;
   job_type: string | null;

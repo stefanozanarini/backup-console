@@ -1,0 +1,69 @@
+from datetime import UTC, datetime, timedelta
+
+from tests.conftest import as_user
+from tests.test_agent_flow import envelope
+from tests.test_ops import approved_agent, job, veeam_report
+
+NOW = datetime.now(UTC)
+
+
+def uranium_report(jobs):
+    return envelope({"product": "uranium", "version": "9.9.0.7469", "jobs": jobs, "errors": [],
+                     "service": {"installed": False, "status": None}})
+
+
+def weekly(result="Warning", days_since_success=8):
+    end = NOW - timedelta(days=days_since_success)
+    return {
+        "id": "uranium:BkpSet00.bks", "name": "salvat", "type": "UraniumBackupSet", "enabled": True,
+        "last_result": result, "last_end": end.isoformat(), "last_success": end.isoformat(),
+        "details": {
+            "expected_interval_h": 168.0,
+            "messages": [{"object": "\\\\192.168.0.8\\Archivio_user", "status": "warning", "text": "Nessun file copiato"}],
+            "history": [{"id": "BkpSet00.bks\\127", "start": (end - timedelta(minutes=29)).isoformat(),
+                         "end": end.isoformat(), "result": result, "backup_bytes": 64981462456,
+                         "reason": "Backup completato con successo"}],
+        },
+    }
+
+
+async def test_uranium_jobs_problems_and_history(client):
+    data, auth = await approved_agent(client, roles=("veeam_vbr",))
+    dev = data["device_id"]
+    # Server con Veeam B&R e Uranium: i due report non si sovrascrivono.
+    await client.post("/agent/v1/veeam", headers=auth, json=veeam_report([job("v1", "Success")]))
+    r = await client.post("/agent/v1/uranium", headers=auth, json=uranium_report([weekly()]))
+    assert r.status_code == 200, r.text
+    d = (await client.get(f"/api/v1/devices/{dev}", headers=as_user())).json()
+    assert d["veeam"]["product"] == "vbr" and d["uranium"]["service"]["installed"] is False
+
+    jobs = {j["job_key"]: j for j in (await client.get(f"/api/v1/veeam/jobs?device_id={dev}", headers=as_user())).json()}
+    assert set(jobs) == {"v1", "uranium:BkpSet00.bks"} and jobs["uranium:BkpSet00.bks"]["product"] == "uranium"
+
+    # Job settimanale: 8 giorni senza successo non superano la soglia adattata (252 ore);
+    # l'esito con avvisi apre il problema, con il dettaglio dell'elemento.
+    problems = {p["check"]: p for p in (await client.get("/api/v1/problems", headers=as_user())).json()}
+    assert set(problems) == {"veeam.job_result"}
+    assert problems["veeam.job_result"]["details"]["messages"][0]["text"] == "Nessun file copiato"
+
+    sessions = (await client.get(f"/api/v1/veeam/sessions?device_id={dev}&job_key=uranium:BkpSet00.bks", headers=as_user())).json()
+    assert len(sessions) == 1 and sessions[0]["backup_bytes"] == 64981462456 and sessions[0]["product"] == "uranium"
+
+    # Oltre due volte e mezza l'intervallo abituale: critico.
+    await client.post("/agent/v1/uranium", headers=auth, json=uranium_report([weekly("Success", 20)]))
+    problems = {p["check"]: p for p in (await client.get("/api/v1/problems", headers=as_user())).json()}
+    assert problems["veeam.last_success_age_h"]["severity"] == "critical"
+
+    # Rilancio non disponibile per Uranium; prodotti sugli endpoint sbagliati rifiutati.
+    r = await client.post(f"/api/v1/devices/{dev}/veeam/jobs/start", json={"job_key": "uranium:BkpSet00.bks"}, headers=as_user())
+    assert r.status_code == 409
+    assert (await client.post("/agent/v1/veeam", headers=auth, json=uranium_report([]))).status_code == 422
+    assert (await client.post("/agent/v1/uranium", headers=auth, json=veeam_report([]))).status_code == 422
+
+
+async def test_new_roles_are_accepted(client):
+    _, auth = await approved_agent(client)
+    hb = {"version": "0.2.18", "roles": ["uranium", "system", "prodotto_futuro"]}
+    assert (await client.post("/agent/v1/heartbeat", json=hb, headers=auth)).status_code == 200
+    bad = {"version": "0.2.18", "roles": ["Nome Non Valido"]}
+    assert (await client.post("/agent/v1/heartbeat", json=bad, headers=auth)).status_code == 422

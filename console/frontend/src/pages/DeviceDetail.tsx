@@ -8,7 +8,7 @@ import CommandPanel from "../CommandPanel";
 import LineChart, { type Series } from "../LineChart";
 import type { DeviceDetail, MetricSeries, Problem, Release } from "../types";
 import { DeviceBackupWindow } from "../BackupWindow";
-import { VeeamSection } from "../veeam";
+import { UraniumSection, VeeamSection } from "../veeam";
 import VeeamCleanup from "../VeeamCleanup";
 
 const RANGES = [
@@ -154,6 +154,7 @@ export default function DeviceDetailPage() {
       </section>
 
       <VeeamSection device={d} writable={writable} />
+      <UraniumSection device={d} />
       <DeviceBackupWindow deviceId={d.id} writable={writable} />
       <VeeamCleanup device={d} writable={writable} />
 
