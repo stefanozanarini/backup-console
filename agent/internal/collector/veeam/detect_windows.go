@@ -27,6 +27,13 @@ func serviceInstalled(name string) bool {
 
 func detectVBR() bool { return serviceInstalled("VeeamBackupSvc") }
 
+// ServiceInstalled e RunPowerShell servono anche ai pacchetti di raccolta (internal/pack).
+func ServiceInstalled(name string) bool { return serviceInstalled(name) }
+
+func RunPowerShell(ctx context.Context, script string) ([]byte, error) {
+	return runPowerShell(ctx, script)
+}
+
 // Veeam Agent standalone: il servizio esiste anche quando l'agente è gestito da VBR;
 // su un server VBR lo ignoriamo (i suoi job arrivano già dal collector VBR).
 func detectVAW() bool { return serviceInstalled("VeeamEndpointBackupSvc") && !detectVBR() }

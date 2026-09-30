@@ -41,6 +41,26 @@ class HeartbeatRequest(BaseModel):
     uptime_s: int | None = None
 
 
+class PackRef(BaseModel):
+    version: str
+    sha256: str
+
+
+class ProbeResultIn(BaseModel):
+    """Output di un probe del pacchetto di raccolta (agent/internal/agent/packs.go)."""
+
+    probe: str = Field(pattern=r"^[a-z0-9_]{1,40}$")
+    pack_version: str = Field(max_length=32)
+    started_at: datetime
+    duration_ms: int = Field(ge=0)
+    ok: bool
+    stdout: str = Field(default="", max_length=9_000_000)
+    stderr: str = Field(default="", max_length=10_000)
+    error: str = Field(default="", max_length=3000)
+    note: str = Field(default="", max_length=1000)
+    truncated: bool = False
+
+
 class HeartbeatResponse(BaseModel):
     status: str
     server_time: datetime
@@ -49,6 +69,8 @@ class HeartbeatResponse(BaseModel):
     desired_version: str | None = None
     # Finestra di backup effettiva (solo PC Windows con Veeam Agent).
     backup_window: dict[str, Any] | None = None
+    # Pacchetto di raccolta attivo (l'agente lo scarica se ha un hash diverso).
+    collector_pack: PackRef | None = None
 
 
 class Envelope[T](BaseModel):

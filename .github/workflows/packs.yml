@@ -1,0 +1,64 @@
+# Pacchetto di raccolta: probe e script eseguiti dagli agenti (cartella packs/).
+# Si pubblica con un tag pack-vX.Y.Z: la CI lo firma con la chiave dei rilasci (dopo
+# l'approvazione dell'environment agent-release) e lo carica in console, dove diventa
+# quello attivo. Gli agenti lo scaricano da soli e lo eseguono solo se la firma è valida.
+name: collector-pack
+
+on:
+  push:
+    tags: ["pack-v*"]
+  pull_request:
+    paths: ["packs/**", "agent/internal/pack/**", "agent/cmd/bc-release/**", ".github/workflows/packs.yml"]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      # Costruzione con una chiave usa e getta: verifica formato, file e condizioni.
+      - run: |
+          cd agent
+          go run ./cmd/bc-release keygen -out /tmp/test.key >/dev/null
+          go run ./cmd/bc-release pack -key /tmp/test.key -version 0.0.0 -src ../packs -out /tmp/pack
+          go test ./internal/pack ./internal/collector/veeam
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/pack-v')
+    needs: [check]
+    runs-on: ubuntu-latest
+    concurrency:
+      group: collector-pack-${{ github.ref }}
+      cancel-in-progress: false
+    environment: agent-release  # stessa approvazione manuale dei rilasci dell'agente
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - name: Firma del pacchetto
+        env:
+          BC_RELEASE_KEY: ${{ secrets.AGENT_RELEASE_SIGNING_KEY }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#pack-v}"
+          cd agent && go run ./cmd/bc-release pack -version "$VERSION" -src ../packs -out ../dist
+      - name: Carica in console
+        env:
+          CONSOLE_URL: ${{ vars.CONSOLE_URL }}
+          TOKEN: ${{ secrets.CONSOLE_RELEASE_TOKEN }}
+        run: |
+          if [ -z "$CONSOLE_URL" ] || [ -z "$TOKEN" ]; then
+            echo "::error::CONSOLE_URL o CONSOLE_RELEASE_TOKEN non impostati"; exit 1
+          fi
+          code=$(curl -sS -o resp.json -w '%{http_code}' --retry 3 --retry-all-errors --max-time 300 \
+            -H "Authorization: Bearer $TOKEN" \
+            -F "bundle=@dist/collector-pack.json" -F "signature=$(cat dist/collector-pack.sig)" \
+            -F "notes=${GITHUB_REF_NAME} (CI)" "$CONSOLE_URL/api/v1/collector-packs")
+          cat resp.json; echo
+          case "$code" in
+            201) echo "pacchetto caricato e attivo in console" ;;
+            409) echo "::notice::versione già presente in console" ;;
+            *) echo "::error::caricamento non riuscito (HTTP $code)"; exit 1 ;;
+          esac

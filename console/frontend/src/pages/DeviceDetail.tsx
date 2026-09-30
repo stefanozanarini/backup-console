@@ -114,6 +114,20 @@ export default function DeviceDetailPage() {
                 <dt>Enrollment</dt><dd>{dateTime(d.agent.enrolled_at)}</dd>
                 <dt>Certificato</dt><dd>scade {dateTime(d.agent.cert_not_after)}</dd>
                 <dt>Shell remota</dt><dd>{d.agent.allow_shell ? "consentita dal dispositivo" : "disabilitata sul dispositivo"}</dd>
+                {Object.keys(d.probe_status ?? {}).length > 0 && (
+                  <>
+                    <dt>Raccolta</dt>
+                    <dd>
+                      {Object.entries(d.probe_status ?? {}).map(([id, st]) => (
+                        <div key={id} className="small" title={st.error ?? st.note ?? undefined}>
+                          <span className={`badge ${st.ok ? "good" : "critical"}`}>{st.ok ? "OK" : "Errore"}</span>{" "}
+                          <span className="mono">{id}</span> <span className="muted">{ago(st.at)} · pacchetto {st.pack}</span>
+                          {st.error && <div className="muted">{st.error}</div>}
+                        </div>
+                      ))}
+                    </dd>
+                  </>
+                )}
               </dl>
               {writable && d.agent.status !== "revoked" && (
                 <div className="btn-row" style={{ marginTop: 14 }}>

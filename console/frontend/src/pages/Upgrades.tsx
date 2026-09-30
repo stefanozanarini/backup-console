@@ -104,6 +104,7 @@ export default function Upgrades() {
         </table>
         {releases.data?.length === 0 && <Empty>Nessun rilascio caricato</Empty>}
       </div>
+      {isSuperadmin && <CollectorPacks />}
     </>
   );
 }
@@ -161,6 +162,69 @@ function UploadRelease({ onDone }: { onDone: () => void }) {
           <button className="btn primary" type="submit" disabled={busy}>{busy ? "Caricamento…" : "Carica"}</button>
         </div>
       </form>
+    </section>
+  );
+}
+
+interface CollectorPack {
+  version: string;
+  sha256: string;
+  probes: string[];
+  notes: string | null;
+  active: boolean;
+  created_at: string;
+  activated_at: string | null;
+  size: number;
+}
+
+/** Pacchetti di raccolta: la logica di raccolta, aggiornata senza aggiornare gli agenti. */
+function CollectorPacks() {
+  const packs = useApi<CollectorPack[]>("/collector-packs", 60000);
+  const [error, setError] = useState<Error | null>(null);
+
+  async function activate(v: string) {
+    if (!window.confirm(`Rendere attivo il pacchetto di raccolta ${v}? Gli agenti lo useranno entro qualche minuto.`)) return;
+    setError(null);
+    try {
+      await api(`/collector-packs/${v}/activate`, { method: "POST" });
+      await packs.reload();
+    } catch (e) {
+      setError(e as Error);
+    }
+  }
+
+  return (
+    <section className="card" style={{ marginTop: 16 }}>
+      <h2>Pacchetto di raccolta</h2>
+      <p className="muted small" style={{ marginTop: 0 }}>
+        Script e probe con cui gli agenti raccolgono i dati (Veeam, Uranium…). Si pubblicano dalla CI con un tag
+        <code> pack-vX.Y.Z</code>, firmati con la chiave dei rilasci: gli agenti li scaricano da soli e li eseguono
+        solo se la firma è valida. Qui si vede quale è attivo e si può tornare a una versione precedente.
+      </p>
+      <ErrorBox error={packs.error ?? error} />
+      <div className="table-wrap">
+        <table>
+          <thead><tr><th>Versione</th><th>Probe</th><th>Caricato</th><th>Note</th><th className="num">Dimensione</th><th /></tr></thead>
+          <tbody>
+            {(packs.data ?? []).map((p) => (
+              <tr key={p.version}>
+                <td className="nowrap">
+                  <span className="mono">{p.version}</span>
+                  {p.active && <span className="badge good" style={{ marginLeft: 6 }}>attivo</span>}
+                </td>
+                <td className="small">{p.probes.join(", ")}</td>
+                <td className="nowrap" title={dateTime(p.created_at)}>{dateTime(p.created_at)}</td>
+                <td className="muted small">{p.notes}</td>
+                <td className="num">{bytes(p.size)}</td>
+                <td className="num">
+                  {!p.active && <button className="btn small" onClick={() => void activate(p.version)}>Attiva</button>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {packs.data?.length === 0 && <Empty>Nessun pacchetto caricato: gli agenti usano la raccolta integrata</Empty>}
+      </div>
     </section>
   );
 }

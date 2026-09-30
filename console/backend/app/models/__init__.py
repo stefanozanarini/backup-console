@@ -2,7 +2,7 @@ from app.models.audit import AuditLog
 from app.models.base import Base
 from app.models.commands import FINAL_STATUSES, MAX_OUTPUT, Command, CommandStatus, CommandType
 from app.models.device import Agent, AgentStatus, Device, DeviceKind, EnrollmentToken, token_usable
-from app.models.releases import PACKAGES, PLATFORMS, Release, ReleaseAsset
+from app.models.releases import CollectorPack, PACKAGES, PLATFORMS, Release, ReleaseAsset
 from app.models.problems import CheckRule, Problem, ProblemState, Severity
 from app.models.telemetry import AgentMessage, Event, InventorySnapshot, Metric
 from app.models.tenancy import ApiKey, Elevation, LocalSession, Role, RoleAssignment, Site, Tenant, User
@@ -14,6 +14,7 @@ __all__ = [
     "PACKAGES",
     "PLATFORMS",
     "token_usable",
+    "CollectorPack",
     "Command",
     "CommandStatus",
     "CommandType",

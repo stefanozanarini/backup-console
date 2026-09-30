@@ -2,13 +2,14 @@
 
 import hashlib
 import json
+import re
 import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile, status
-from sqlalchemy import or_, func, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -20,6 +21,7 @@ from app.db import get_session
 from fastapi.responses import FileResponse
 
 from app.models import (
+    CollectorPack,
     FINAL_STATUSES,
     PACKAGES,
     PLATFORMS,
@@ -241,6 +243,82 @@ async def list_releases(user: CurrentUserDep, session: SessionDep):
                    agents=counts.get(r.version, 0))
         for r in releases
     ]
+
+
+# --- pacchetti di raccolta ---------------------------------------------------
+
+PACK_VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
+
+
+def _pack_out(p: CollectorPack) -> dict:
+    return {"version": p.version, "sha256": p.sha256, "probes": p.probes, "notes": p.notes, "active": p.active,
+            "created_at": p.created_at, "activated_at": p.activated_at, "size": len(p.bundle)}
+
+
+async def _activate(session: AsyncSession, pack: CollectorPack) -> None:
+    await session.execute(update(CollectorPack).where(CollectorPack.active.is_(True)).values(active=False))
+    pack.active, pack.activated_at = True, utcnow()
+
+
+@router.get("/collector-packs")
+async def list_collector_packs(user: CurrentUserDep, session: SessionDep):
+    if not user.is_superadmin:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "solo superadmin")
+    packs = (await session.scalars(select(CollectorPack).order_by(CollectorPack.created_at.desc()))).all()
+    return [_pack_out(p) for p in packs]
+
+
+@router.post("/collector-packs", status_code=201)
+async def upload_collector_pack(
+    session: SessionDep,
+    request: Request,
+    bundle: Annotated[UploadFile, File(description="collector-pack.json prodotto da `bc-release pack`")],
+    signature: Annotated[str, Form(max_length=200)],
+    notes: Annotated[str | None, Form(max_length=2000)] = None,
+):
+    """Superadmin o la CI (chiave API releases:upload). Il pacchetto caricato diventa quello
+    attivo: la firma è già passata dall'approvazione della pubblicazione nella CI."""
+    actor = await superadmin_or_key(request, session, "releases:upload")
+    raw = await bundle.read()
+    if len(raw) > 10 * 1024 * 1024:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "pacchetto troppo grande")
+    try:
+        doc = json.loads(raw)
+        version, probes = doc["version"], doc["probes"]
+        if doc.get("format") != 1 or not isinstance(probes, list):
+            raise ValueError
+    except (ValueError, KeyError, TypeError) as e:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "pacchetto non valido") from e
+    if not isinstance(version, str) or not PACK_VERSION_RE.match(version):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "versione non valida")
+    signature = signature.strip()
+    if settings.release_public_key and not verify_signature(raw, signature, settings.release_public_key):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "firma non valida")
+    if await session.get(CollectorPack, version) is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "versione già presente")
+    pack = CollectorPack(version=version, sha256=sha256_hex(raw), signature=signature, bundle=raw, notes=notes,
+                         probes=[p.get("id") for p in probes if isinstance(p, dict)])
+    session.add(pack)
+    await session.flush()
+    await _activate(session, pack)
+    audit(session, "collector_pack.upload", user_id=actor.user_id, target=version, ip=client_ip(request),
+          actor=actor.label, probes=pack.probes)
+    await session.commit()
+    return _pack_out(pack)
+
+
+@router.post("/collector-packs/{version}/activate")
+async def activate_collector_pack(version: str, user: CurrentUserDep, session: SessionDep, request: Request):
+    """Rende attivo un pacchetto già caricato (es. per tornare alla versione precedente)."""
+    if not user.is_superadmin:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "solo superadmin")
+    pack = await session.get(CollectorPack, version)
+    if pack is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "non trovato")
+    await _activate(session, pack)
+    audit(session, "collector_pack.activate", user_id=user.id, target=version, ip=client_ip(request))
+    await session.commit()
+    return _pack_out(pack)
 
 
 @router.post("/releases", response_model=ReleaseOut, status_code=201)

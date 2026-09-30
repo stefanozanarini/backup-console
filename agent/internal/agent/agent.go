@@ -94,6 +94,7 @@ type Agent struct {
 	restart     chan struct{}
 	execSlots   chan struct{}
 	window      *backupWindow
+	packs       *packs
 }
 
 func New(cfg *config.Config, c *client.Client) *Agent {
@@ -101,6 +102,7 @@ func New(cfg *config.Config, c *client.Client) *Agent {
 		cfg: cfg, client: c, collectors: Detect(), started: time.Now(),
 		restart: make(chan struct{}), execSlots: make(chan struct{}, 2),
 		window: newBackupWindow(cfg.DataDir),
+		packs:  newPacks(cfg.DataDir),
 	}
 }
 
@@ -118,10 +120,14 @@ func (a *Agent) Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(3)
 	go func() {
 		defer wg.Done()
 		a.commandLoop(ctx)
+	}()
+	go func() {
+		defer wg.Done()
+		a.packs.loop(ctx, a.sendProbe)
 	}()
 	go func() {
 		defer wg.Done()
@@ -211,7 +217,7 @@ func (a *Agent) heartbeat(ctx context.Context) {
 	var resp client.HeartbeatResponse
 	err := a.client.Post(ctx, "/agent/v1/heartbeat", client.HeartbeatRequest{
 		Version:      version.Version,
-		Roles:        Roles(a.collectors),
+		Roles:        a.roles(),
 		Capabilities: map[string]any{"collectors": Roles(a.collectors), "platform": upgrade.Platform(), "upgrade": upgrade.PublicKey != "" || a.cfg.AllowUnsignedUpgrades},
 		AllowShell:   a.cfg.RemoteExecAllowed(),
 		UptimeS:      int64(time.Since(a.started).Seconds()),
@@ -230,6 +236,9 @@ func (a *Agent) heartbeat(ctx context.Context) {
 	}
 	a.lastOK = time.Now()
 	a.window.set(resp.BackupWindow)
+	if a.approved.Load() || resp.Status == "approved" {
+		go a.packs.sync(ctx, a.client, resp.CollectorPack)
+	}
 	a.window.tick(time.Now())
 	a.writeStatus(resp.Status, nil)
 	if resp.Status != a.status {
@@ -295,6 +304,31 @@ func (a *Agent) sendMetrics(ctx context.Context) {
 	}
 }
 
+// roles: ruoli dei collector integrati più quelli rilevati dal pacchetto di raccolta.
+func (a *Agent) roles() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, r := range append(Roles(a.collectors), a.packs.roles()...) {
+		if !seen[r] {
+			seen[r] = true
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+func (a *Agent) sendProbe(ctx context.Context, r probeResult) {
+	if !a.approved.Load() {
+		return
+	}
+	if !r.OK {
+		log.Printf("probe %s: %s", r.Probe, r.Error)
+	}
+	if err := a.client.Send(ctx, "/agent/v1/probe", a.client.NewEnvelope(r)); err != nil {
+		log.Printf("invio probe %s: %v", r.Probe, err)
+	}
+}
+
 func (a *Agent) sendInventory(ctx context.Context) {
 	env := a.client.NewEnvelope(CollectInventory(ctx, a.collectors))
 	if err := a.client.Send(ctx, "/agent/v1/inventory", env); err != nil {
@@ -307,6 +341,9 @@ func (a *Agent) sendReports(ctx context.Context) {
 		r, ok := c.(Reporter)
 		if !ok {
 			continue
+		}
+		if a.packs.replaces(c.Name()) {
+			continue // la raccolta arriva dal pacchetto
 		}
 		path, payload, err := r.Report(ctx)
 		if err != nil {

@@ -200,6 +200,20 @@ type HeartbeatResponse struct {
 	DesiredVersion *string   `json:"desired_version"`
 	// Finestra di backup effettiva (solo PC con Veeam Agent); nil = nessuna.
 	BackupWindow *window.Window `json:"backup_window"`
+	// Pacchetto di raccolta attivo in console (nil = nessuno).
+	CollectorPack *PackRef `json:"collector_pack"`
+}
+
+type PackRef struct {
+	Version string `json:"version"`
+	SHA256  string `json:"sha256"`
+}
+
+// PackDownload: pacchetto di raccolta (byte originali in base64) con la firma della CI.
+type PackDownload struct {
+	Version   string `json:"version"`
+	Bundle    string `json:"bundle"`
+	Signature string `json:"signature"`
 }
 
 type Command struct {

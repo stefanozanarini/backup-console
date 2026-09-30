@@ -8,6 +8,10 @@
 //	bc-release sign -key release-signing.key -version 0.2.0 dist/
 //	    firma i binari bc-agent-<piattaforma>[.exe] e i QPKG della stessa versione in dist/
 //	    e scrive dist/manifest.json, da caricare in console insieme ai file.
+//
+//	bc-release pack -key release-signing.key -version 1.0.0 -src ../packs -out dist/
+//	    costruisce il pacchetto di raccolta da packs/probes.json e packs/scripts/, lo firma e
+//	    scrive dist/collector-pack.json e dist/collector-pack.sig, da caricare in console.
 package main
 
 import (
@@ -47,7 +51,7 @@ type manifest struct {
 func main() {
 	log.SetFlags(0)
 	if len(os.Args) < 2 {
-		log.Fatal("uso: bc-release keygen|sign|pubkey ...")
+		log.Fatal("uso: bc-release keygen|sign|pack|pubkey ...")
 	}
 	switch os.Args[1] {
 	case "keygen":
@@ -77,6 +81,17 @@ func main() {
 			log.Fatal("uso: bc-release sign -key FILE -version X.Y.Z DIR")
 		}
 		sign(loadKey(*key), *ver, fs.Arg(0))
+	case "pack":
+		fs := flag.NewFlagSet("pack", flag.ExitOnError)
+		key := fs.String("key", "", "file della chiave privata (oppure variabile BC_RELEASE_KEY)")
+		ver := fs.String("version", "", "versione del pacchetto (X.Y.Z)")
+		src := fs.String("src", "../packs", "cartella con probes.json e scripts/")
+		out := fs.String("out", "dist", "cartella di uscita")
+		_ = fs.Parse(os.Args[2:])
+		if *ver == "" {
+			log.Fatal("uso: bc-release pack -key FILE -version X.Y.Z [-src DIR] [-out DIR]")
+		}
+		buildPack(loadKey(*key), *ver, *src, *out)
 	default:
 		log.Fatalf("comando sconosciuto %q", os.Args[1])
 	}

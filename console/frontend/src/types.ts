@@ -128,6 +128,7 @@ export interface DeviceDetail extends Device {
   inventory_at: string | null;
   veeam: VeeamStatus;
   backup_apps?: { uranium?: BackupAppStatus; hyperbackup?: BackupAppStatus };
+  probe_status?: Record<string, { at: string; ok: boolean; duration_ms: number; pack: string; error?: string | null; note?: string | null }>;
 }
 
 export type VeeamResult = "Success" | "Warning" | "Failed" | "None" | string;

@@ -1,7 +1,8 @@
 import uuid
 from datetime import datetime
+from typing import Any
 
-from sqlalchemy import BigInteger, ForeignKey, String
+from sqlalchemy import BigInteger, ForeignKey, LargeBinary, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, utcnow
@@ -30,3 +31,21 @@ class ReleaseAsset(Base):
     size: Mapped[int] = mapped_column(BigInteger)
     # Firma Ed25519 (base64) dei byte del binario, prodotta da `bc-release sign`.
     signature: Mapped[str] = mapped_column(String(200))
+
+
+class CollectorPack(Base):
+    """Pacchetto di raccolta (probe e script eseguiti dagli agenti), firmato dalla CI con
+    la chiave dei rilasci. Uno solo è attivo: gli agenti lo scaricano e, dopo aver
+    verificato la firma, lo eseguono."""
+
+    __tablename__ = "collector_packs"
+
+    version: Mapped[str] = mapped_column(String(32), primary_key=True)
+    sha256: Mapped[str] = mapped_column(String(64))
+    signature: Mapped[str] = mapped_column(String(200))
+    bundle: Mapped[bytes] = mapped_column(LargeBinary)  # byte esatti firmati
+    probes: Mapped[list[Any]] = mapped_column(default=list)  # id dei probe, per la console
+    notes: Mapped[str | None] = mapped_column(String(2000))
+    active: Mapped[bool] = mapped_column(default=False)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    activated_at: Mapped[datetime | None]

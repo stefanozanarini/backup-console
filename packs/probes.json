@@ -1,0 +1,43 @@
+{
+  "_comment": "Pacchetto di raccolta: probe eseguiti dall'agente. Si pubblica con il tag pack-vX.Y.Z (la CI lo firma e lo carica in console). L'output di ogni probe va a /agent/v1/probe e la console lo interpreta con il parser dello stesso id.",
+  "probes": [
+    {
+      "id": "veeam_vbr",
+      "platform": "windows",
+      "interpreter": "powershell",
+      "scripts": ["common.ps1", "vbr.ps1"],
+      "detect": {"service": "VeeamBackupSvc"},
+      "role": "veeam_vbr",
+      "replaces": "veeam_vbr",
+      "interval_s": 900,
+      "timeout_s": 240,
+      "retry": {"prelude": "$IncludeHistory = $false", "timeout_s": 300, "note": "storico sessioni non raccolto"}
+    },
+    {
+      "id": "veeam_vaw",
+      "platform": "windows",
+      "interpreter": "powershell",
+      "scripts": ["common.ps1", "vaw.ps1"],
+      "detect": {"all": [{"service": "VeeamEndpointBackupSvc"}, {"not": {"service": "VeeamBackupSvc"}}]},
+      "role": "veeam_agent",
+      "replaces": "veeam_vaw",
+      "interval_s": 900,
+      "timeout_s": 300
+    },
+    {
+      "id": "uranium",
+      "platform": "windows",
+      "interpreter": "powershell",
+      "scripts": ["common.ps1", "uranium.ps1"],
+      "detect": {"any": [
+        {"dir": "%ProgramData%\\UraniumBackup\\Log"},
+        {"file": "%ProgramFiles(x86)%\\Uranium Backup\\Uranium.exe"},
+        {"file": "%ProgramFiles%\\Uranium Backup\\Uranium.exe"}
+      ]},
+      "role": "uranium",
+      "replaces": "uranium",
+      "interval_s": 900,
+      "timeout_s": 300
+    }
+  ]
+}

@@ -47,6 +47,8 @@ class Device(UUIDPk, Base):
     # Altri software di backup (i job sono in veeam_jobs): {"uranium": {...}, "hyperbackup": {...}}
     # con versione, errori, data del report e dati propri (es. servizio di Uranium).
     backup_apps: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    # Ultima esecuzione di ogni probe del pacchetto di raccolta: {id: {at, ok, duration_ms, pack, error}}.
+    probe_status: Mapped[dict[str, Any]] = mapped_column(default=dict)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     last_seen_at: Mapped[datetime | None]
 

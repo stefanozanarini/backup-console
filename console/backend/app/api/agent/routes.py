@@ -1,3 +1,4 @@
+import base64
 import asyncio
 import hashlib
 import time
@@ -29,6 +30,7 @@ from app.models import (
     Event,
     InventorySnapshot,
     Metric,
+    CollectorPack,
     Release,
     Tenant,
     token_usable,
@@ -41,6 +43,8 @@ from app.schemas.agent import (
     EventsPayload,
     HeartbeatRequest,
     HeartbeatResponse,
+    PackRef,
+    ProbeResultIn,
     IngestResponse,
     InventoryPayload,
     MetricsPayload,
@@ -52,6 +56,7 @@ from app.schemas.agent import (
 from app.services.audit import audit
 from app.services.ca import CSRError
 from app.services import backup_window
+from app.services import probes as probe_service
 from app.services import veeam as veeam_service
 from app.services.problems import evaluate_metrics, raise_problem, resolve_problem
 from app.services.releases import asset_path, download_name
@@ -176,11 +181,33 @@ async def heartbeat(body: HeartbeatRequest, request: Request, agent: AgentDep, s
     if agent.status == AgentStatus.APPROVED:
         await resolve_problem(session, agent.device_id, "agent.offline")
         await _complete_upgrades(session, agent)
-    window = None
+    window = pack_ref = None
     if agent.status == AgentStatus.APPROVED:
         window = backup_window.for_agent(agent.device, await session.get(Tenant, agent.device.tenant_id))
+        pack = await session.scalar(select(CollectorPack).where(CollectorPack.active.is_(True)))
+        if pack is not None:
+            pack_ref = PackRef(version=pack.version, sha256=pack.sha256)
     await session.commit()
-    return HeartbeatResponse(status=agent.status, server_time=now, backup_window=window)
+    return HeartbeatResponse(status=agent.status, server_time=now, backup_window=window, collector_pack=pack_ref)
+
+
+@router.get("/collector-pack/{version}")
+async def collector_pack(version: str, agent: ApprovedAgentDep, session: SessionDep):
+    """Pacchetto di raccolta: byte originali e firma. L'agente verifica la firma con la
+    chiave dei rilasci incorporata e, se non è valida, non lo esegue."""
+    pack = await session.get(CollectorPack, version)
+    if pack is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "pacchetto non trovato")
+    return {"version": pack.version, "bundle": base64.b64encode(pack.bundle).decode(), "signature": pack.signature}
+
+
+@router.post("/probe", response_model=IngestResponse)
+async def probe(env: Envelope[ProbeResultIn], agent: ApprovedAgentDep, session: SessionDep):
+    if not await _first_delivery(session, agent, env.msg_id, "probe"):
+        return IngestResponse(accepted=True, duplicate=True)
+    await probe_service.ingest(session, agent.device, env.payload, env.ts)
+    await session.commit()
+    return IngestResponse(accepted=True)
 
 
 async def _complete_upgrades(session: AsyncSession, agent: Agent) -> None:
@@ -255,8 +282,7 @@ async def metrics(env: Envelope[MetricsPayload], agent: ApprovedAgentDep, sessio
     return IngestResponse(accepted=True)
 
 
-COLLECTOR_LABELS = {"veeam_vbr": "Veeam B&R", "veeam_vaw": "Veeam Agent", "uranium": "Uranium Backup",
-                    "synology": "Hyper Backup"}
+COLLECTOR_LABELS = probe_service.LABELS
 
 
 @router.post("/events", response_model=IngestResponse)

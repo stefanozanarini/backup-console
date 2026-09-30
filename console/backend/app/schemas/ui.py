@@ -127,6 +127,7 @@ class DeviceUpdate(BaseModel):
 class DeviceDetail(DeviceOut):
     veeam: dict[str, Any] = {}
     backup_apps: dict[str, Any] = {}
+    probe_status: dict[str, Any] = {}
     inventory: dict[str, Any] | None = None
     inventory_at: datetime | None = None
 

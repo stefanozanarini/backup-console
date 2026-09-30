@@ -205,6 +205,16 @@ func renameRetry(from, to string) error {
 	}
 }
 
+// ReleaseKey: chiave pubblica dei rilasci, anche per verificare i pacchetti di raccolta
+// (nil se il binario è stato compilato senza).
+func ReleaseKey() ed25519.PublicKey {
+	k, err := publicKey(false)
+	if err != nil {
+		return nil
+	}
+	return k
+}
+
 func publicKey(allowUnsigned bool) (ed25519.PublicKey, error) {
 	if PublicKey == "" {
 		if allowUnsigned {
