@@ -107,13 +107,15 @@ function installCommands(server: string, token: string) {
     `  foreach ($i in 1..10) { try { Remove-Item $f -ErrorAction Stop; break } catch { Start-Sleep 2 } }\n` +
     `}`;
   const qnap =
-    `# SSH come admin sul NAS: scarica il QPKG giusto, lo installa e registra l'agente.\n` +
+    `# SSH come admin sul NAS (anche "sudo bash"): scarica il QPKG giusto, lo installa e registra l'agente.\n` +
     `T='${token}'; S='${server}'\n` +
     `case "$(uname -m)" in x86_64) A=x86_64;; aarch64) A=arm_64;; *) A=arm-x41;; esac\n` +
-    `curl -fsS -H "X-Enroll-Token: $T" -o /tmp/bc-agent.qpkg "$S/agent/v1/download/qpkg-$A" \\\n` +
-    `  && sh /tmp/bc-agent.qpkg \\\n` +
-    `  && sh "$(/sbin/getcfg BackupConsoleAgent Install_Path -f /etc/config/qpkg.conf)/bc-agent.sh" enroll -server "$S" -token "$T"\n` +
-    `rm -f /tmp/bc-agent.qpkg`;
+    `curl -fsS -H "X-Enroll-Token: $T" -o /tmp/bc-agent.qpkg "$S/agent/v1/download/qpkg-$A" || echo "download non riuscito"\n` +
+    // L'installer dei QPKG può uscire con un codice diverso da 0 anche quando va a buon
+    // fine: non si concatena con &&, si controlla dopo che il pacchetto risulti installato.
+    `sh /tmp/bc-agent.qpkg; rm -f /tmp/bc-agent.qpkg\n` +
+    `D="$(/sbin/getcfg BackupConsoleAgent Install_Path -f /etc/config/qpkg.conf)"\n` +
+    `if [ -n "$D" ]; then sh "$D/bc-agent.sh" enroll -server "$S" -token "$T"; else echo "pacchetto non installato"; fi`;
   return { windows, qnap };
 }
 
