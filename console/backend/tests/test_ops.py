@@ -317,3 +317,33 @@ async def test_veeam_job_start(client):
     assert (await client.post(url, json={"job_key": running["id"]}, headers=as_user())).status_code == 409
     assert (await client.post(url, json={"job_key": off["id"]}, headers=as_user())).status_code == 409
     assert (await client.post(url, json={"job_key": "nope"}, headers=as_user())).status_code == 404
+
+
+async def test_command_history_search_and_delete(client):
+    from sqlalchemy import select
+
+    from app.db import SessionLocal
+    from app.models import AuditLog
+
+    data, auth = await approved_agent(client)
+    dev = data["device_id"]
+    h = await elevated(client)
+    ids = []
+    for c in ("df -h", "ls -lrth /volume1/opbck-*", "lss typo"):
+        ids.append((await client.post(f"/api/v1/devices/{dev}/commands", json={"command": c}, headers=h)).json()["id"])
+    hist = (await client.get(f"/api/v1/devices/{dev}/commands?q=opbck", headers=as_user())).json()
+    assert [c["payload"]["command"] for c in hist] == ["ls -lrth /volume1/opbck-*"]
+
+    # Ancora in coda: non si cancella.
+    assert (await client.delete(f"/api/v1/commands/{ids[2]}", headers=as_user())).status_code == 409
+    for _ in ids:
+        cmd = (await client.get("/agent/v1/commands/next?wait=0", headers=auth)).json()
+        await client.post(f"/agent/v1/commands/{cmd['id']}/result", json={"status": "failed", "exit_code": 127}, headers=auth)
+    assert (await client.delete(f"/api/v1/commands/{ids[2]}", headers=as_user())).status_code == 204
+    hist = (await client.get(f"/api/v1/devices/{dev}/commands", headers=as_user())).json()
+    assert [c["payload"]["command"] for c in hist] == ["ls -lrth /volume1/opbck-*", "df -h"]
+    assert (await client.get(f"/api/v1/commands/{ids[2]}", headers=as_user())).status_code == 404
+    # La traccia resta nell'audit.
+    async with SessionLocal() as s:
+        a = await s.scalar(select(AuditLog).where(AuditLog.action == "command.delete"))
+        assert a.details["command"] == "lss typo"

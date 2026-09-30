@@ -74,9 +74,20 @@ export default function CommandPanel({ device, writable }: { device: DeviceDetai
   const [timeout, setTimeoutS] = useState(300);
   const [error, setError] = useState<Error | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
-  const history = useApi<Command[]>(`/devices/${device.id}/commands?limit=15`, 10000);
+  const [histLimit, setHistLimit] = useState(15);
+  const [histQuery, setHistQuery] = useState("");
+  const [search, setSearch] = useState("");
+  // La ricerca parte quando si smette di scrivere.
+  useEffect(() => {
+    const t = window.setTimeout(() => setSearch(histQuery.trim()), 400);
+    return () => window.clearTimeout(t);
+  }, [histQuery]);
+  const history = useApi<Command[]>(
+    `/devices/${device.id}/commands?limit=${histLimit}${search ? `&q=${encodeURIComponent(search)}` : ""}`, 10000,
+  );
   const current = useCommand(selected);
   const out = useRef<HTMLPreElement>(null);
+  const editor = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     if (current && !FINAL.includes(current.status)) void history.reload();
@@ -95,6 +106,26 @@ export default function CommandPanel({ device, writable }: { device: DeviceDetai
         : !writable
           ? "Non hai i permessi di scrittura su questo tenant."
           : null;
+
+  async function remove(c: Command) {
+    if (!window.confirm(`Eliminare dallo storico il comando "${commandLabel(c).slice(0, 120)}" e il suo output?\n\nResta comunque registrato nell'audit della console.`)) return;
+    setError(null);
+    try {
+      await api(`/commands/${c.id}`, { method: "DELETE" });
+      if (selected === c.id) setSelected(null);
+      await history.reload();
+    } catch (err) {
+      setError(err as Error);
+    }
+  }
+
+  function reuse(c: Command) {
+    if (c.type !== "exec" || !c.payload.command) return;
+    setCommand(c.payload.command);
+    if (c.payload.shell) setShell(c.payload.shell);
+    editor.current?.focus();
+    editor.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
 
   async function run(e: React.FormEvent) {
     e.preventDefault();
@@ -127,7 +158,7 @@ export default function CommandPanel({ device, writable }: { device: DeviceDetai
       ) : (
         <form className="stack" onSubmit={run}>
           <textarea
-            className="mono" rows={4} required value={command} spellCheck={false}
+            ref={editor} className="mono" rows={4} required value={command} spellCheck={false}
             placeholder={windows ? "Get-Service Veeam* | Format-Table -Auto" : "df -h; rsync -a --dry-run /share/Dati/ /share/Backup/"}
             onChange={(e) => setCommand(e.target.value)} aria-label="Comando"
             onKeyDown={(e) => {
@@ -175,30 +206,57 @@ export default function CommandPanel({ device, writable }: { device: DeviceDetai
         </div>
       )}
 
-      {(history.data ?? []).length > 0 && (
-        <div className="table-wrap cmd-history" style={{ marginTop: 14 }}>
+      <div className="form-row" style={{ marginTop: 14, justifyContent: "space-between" }}>
+        <h2 style={{ margin: 0 }}>Storico dei comandi</h2>
+        <div className="form-row">
+          <input type="search" placeholder="Cerca nei comandi" value={histQuery} aria-label="Cerca nei comandi"
+            onChange={(e) => setHistQuery(e.target.value)} />
+          <select value={histLimit} onChange={(e) => setHistLimit(Number(e.target.value))} aria-label="Quanti">
+            {[15, 50, 200].map((n) => <option key={n} value={n}>ultimi {n}</option>)}
+          </select>
+        </div>
+      </div>
+      {(history.data ?? []).length > 0 ? (
+        <div className="table-wrap cmd-history" style={{ marginTop: 8 }}>
           <table>
             <thead>
-              <tr><th>Quando</th><th>Comando</th><th>Motivo</th><th>Esito</th></tr>
+              <tr><th>Quando</th><th>Comando</th><th>Motivo</th><th>Esito</th><th /></tr>
             </thead>
             <tbody>
-              {history.data!.map((c) => (
-                <tr key={c.id}>
-                  <td className="nowrap muted" title={dateTime(c.created_at)}>{ago(c.created_at)}</td>
-                  <td>
-                    <button className="linklike mono cmdline" onClick={() => setSelected(c.id)} title={c.payload.command}>
-                      {commandLabel(c)}
-                    </button>
-                  </td>
-                  <td className="muted">{c.reason}</td>
-                  <td className="nowrap">
-                    <CommandStatusBadge status={c.status} />
-                    {c.exit_code !== null && c.exit_code !== 0 && <span className="muted"> ({c.exit_code})</span>}
-                  </td>
-                </tr>
-              ))}
+              {history.data!.map((c) => {
+                const final = FINAL.includes(c.status);
+                return (
+                  <tr key={c.id} className={selected === c.id ? "expanded" : ""}>
+                    <td className="nowrap muted" title={dateTime(c.created_at)}>{ago(c.created_at)}</td>
+                    <td>
+                      <button className="linklike mono cmdline" onClick={() => setSelected(c.id)} title={c.payload.command ?? commandLabel(c)}>
+                        {commandLabel(c)}
+                      </button>
+                    </td>
+                    <td className="muted">{c.reason}</td>
+                    <td className="nowrap">
+                      <CommandStatusBadge status={c.status} />
+                      {c.exit_code !== null && c.exit_code !== 0 && <span className="muted"> ({c.exit_code})</span>}
+                    </td>
+                    <td className="num nowrap">
+                      {c.type === "exec" && !disabledReason && (
+                        <button className="btn small" type="button" title="Rimette il comando nell'editor" onClick={() => reuse(c)}>Usa</button>
+                      )}{" "}
+                      {writable && final && (
+                        <button className="btn small danger" type="button" title="Toglie il comando dallo storico" onClick={() => void remove(c)}>
+                          Elimina
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
+        </div>
+      ) : (
+        <div className="muted small" style={{ marginTop: 8 }}>
+          {search ? `Nessun comando contiene "${search}".` : "Nessun comando eseguito su questo dispositivo."}
         </div>
       )}
     </section>

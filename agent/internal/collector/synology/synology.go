@@ -169,15 +169,37 @@ func slotKey(p string) string {
 func (c *Collector) disks(ctx context.Context) []disk {
 	var out []disk
 	for _, dev := range c.devices() {
-		txt, err := c.run(ctx, "smartctl", "-H", "-i", "-A", dev)
-		if err != nil && strings.TrimSpace(txt) == "" {
-			// Alcuni dischi SATA rispondono solo con il tipo esplicito.
-			txt, _ = c.run(ctx, "smartctl", "-H", "-i", "-A", "-d", "sat", dev)
+		// smartctl esce con un codice diverso da 0 anche quando risponde (bit di stato):
+		// conta l'output. Su DSM i dischi sataN spesso danno salute e attributi solo con il
+		// tipo esplicito: se mancano si riprova con -d sat e poi -d ata.
+		var d disk
+		found := false
+		for _, typ := range []string{"", "sat", "ata"} {
+			args := []string{"-H", "-i", "-A"}
+			if typ != "" {
+				args = append(args, "-d", typ)
+			}
+			txt, _ := c.run(ctx, "smartctl", append(args, dev)...)
+			if strings.TrimSpace(txt) == "" {
+				continue
+			}
+			cur := parseSmartctl(txt)
+			if !found || (cur.smartOK != nil && d.smartOK == nil) || (cur.tempC != nil && d.tempC == nil) {
+				if cur.model == "" {
+					cur.model = d.model
+				}
+				if cur.serial == "" {
+					cur.serial = d.serial
+				}
+				d, found = cur, true
+			}
+			if d.smartOK != nil && d.tempC != nil {
+				break
+			}
 		}
-		if strings.TrimSpace(txt) == "" {
+		if !found {
 			continue
 		}
-		d := parseSmartctl(txt)
 		name := filepath.Base(dev)
 		d.slot = name
 		if strings.HasPrefix(name, "sata") {

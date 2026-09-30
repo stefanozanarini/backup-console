@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile, status
-from sqlalchemy import func, select
+from sqlalchemy import or_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -20,6 +20,7 @@ from app.db import get_session
 from fastapi.responses import FileResponse
 
 from app.models import (
+    FINAL_STATUSES,
     PACKAGES,
     PLATFORMS,
     Agent,
@@ -176,12 +177,36 @@ async def create_command(
 
 
 @router.get("/devices/{device_id}/commands", response_model=list[CommandOut])
-async def list_commands(device_id: uuid.UUID, user: CurrentUserDep, session: SessionDep, limit: int = Query(30, le=200)):
+async def list_commands(
+    device_id: uuid.UUID, user: CurrentUserDep, session: SessionDep,
+    limit: int = Query(30, ge=1, le=500),
+    q: str | None = Query(None, max_length=200, description="testo nel comando o nel motivo"),
+):
     device = await _device_with_agent(session, device_id, user)
-    rows = await session.scalars(
-        select(Command).where(Command.device_id == device.id).order_by(Command.created_at.desc()).limit(limit)
-    )
+    stmt = select(Command).where(Command.device_id == device.id)
+    if q:
+        like = f"%{q.replace('%', r'\%').replace('_', r'\_')}%"
+        stmt = stmt.where(or_(Command.payload["command"].astext.ilike(like), Command.reason.ilike(like),
+                              Command.payload["job_name"].astext.ilike(like)))
+    rows = await session.scalars(stmt.order_by(Command.created_at.desc()).limit(limit))
     return rows.all()
+
+
+@router.delete("/commands/{command_id}", status_code=204)
+async def delete_command(command_id: uuid.UUID, user: CurrentUserDep, session: SessionDep, request: Request):
+    """Toglie un comando (e il suo output) dallo storico, es. un comando digitato male.
+    L'audit conserva chi l'ha eseguito, quando e cosa: la traccia non si cancella."""
+    cmd = await session.get(Command, command_id)
+    if cmd is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "non trovato")
+    user.require_write(cmd.tenant_id)
+    if cmd.status not in FINAL_STATUSES:
+        raise HTTPException(status.HTTP_409_CONFLICT, "il comando non è ancora terminato")
+    audit(session, "command.delete", user_id=user.id, tenant_id=cmd.tenant_id, target=str(cmd.id),
+          ip=client_ip(request), type=cmd.type, command=str(cmd.payload.get("command") or cmd.reason or "")[:500],
+          created_at=cmd.created_at.isoformat(), status=cmd.status)
+    await session.delete(cmd)
+    await session.commit()
 
 
 @router.get("/commands/{command_id}", response_model=CommandDetail)

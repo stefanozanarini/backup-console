@@ -97,3 +97,28 @@ func TestInventory(t *testing.T) {
 		t.Fatalf("dischi: %+v", disks)
 	}
 }
+
+func TestSmartRetriesWithDeviceType(t *testing.T) {
+	c := &Collector{
+		readFile: func(string) ([]byte, error) { return nil, errors.New("no") },
+		glob: func(p string) ([]string, error) {
+			if p == "/dev/sata*" {
+				return []string{"/dev/sata1"}, nil
+			}
+			return nil, nil
+		},
+		// Senza -d risponde solo con le informazioni del disco (com'è su DSM); con -d sat tutto.
+		run: func(_ context.Context, _ string, args ...string) (string, error) {
+			for _, a := range args {
+				if a == "sat" {
+					return smartSata, errors.New("exit status 4")
+				}
+			}
+			return "Device Model:     WDC WD122KRYZ-01CDAB0\nSMART support is: Unavailable\n", errors.New("exit status 4")
+		},
+	}
+	d := c.disks(context.Background())
+	if len(d) != 1 || d[0].smartOK == nil || !*d[0].smartOK || d[0].tempC == nil || *d[0].tempC != 33 {
+		t.Fatalf("%+v", d)
+	}
+}
