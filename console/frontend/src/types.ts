@@ -94,6 +94,7 @@ export interface Inventory {
   data: {
     system?: { os?: string; arch?: string; volumes?: Volume[] };
     qnap?: { firmware?: string; build?: string; disks?: QnapDisk[]; arrays?: RaidArray[] };
+    synology?: { firmware?: string; build?: string; disks?: QnapDisk[]; arrays?: RaidArray[] };
     [collector: string]: unknown;
   };
 }

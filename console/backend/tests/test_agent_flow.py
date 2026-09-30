@@ -253,3 +253,10 @@ async def test_client_cert_headers_require_proxy_secret(client, monkeypatch):
     assert r.status_code == 401
     r = await client.post("/agent/v1/heartbeat", json={"version": "x"}, headers={**auth, "X-Proxy-Secret": "s3greto-condiviso"})
     assert r.status_code == 200
+
+
+async def test_synology_is_a_nas(client):
+    _, site_id = await setup_site(client)
+    data, _, _, _ = await enroll(client, site_id, roles=("synology", "system"))
+    dev = (await client.get(f"/api/v1/devices/{data['device_id']}", headers=as_user())).json()
+    assert dev["kind"] == "nas"

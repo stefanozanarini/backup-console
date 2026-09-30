@@ -17,6 +17,7 @@ import (
 	"backupconsole/agent/internal/client"
 	"backupconsole/agent/internal/collector"
 	"backupconsole/agent/internal/collector/qnap"
+	"backupconsole/agent/internal/collector/synology"
 	"backupconsole/agent/internal/collector/system"
 	"backupconsole/agent/internal/collector/veeam"
 	"backupconsole/agent/internal/config"
@@ -36,7 +37,7 @@ type Reporter interface {
 
 // Detect ritorna i collector attivi su questa macchina.
 func Detect() []collector.Collector {
-	all := []collector.Collector{qnap.New(), veeam.NewVBR(), veeam.NewVAW(), veeam.NewUranium(), system.New()}
+	all := []collector.Collector{qnap.New(), synology.New(), veeam.NewVBR(), veeam.NewVAW(), veeam.NewUranium(), system.New()}
 	var out []collector.Collector
 	for _, c := range all {
 		if c.Detect() {

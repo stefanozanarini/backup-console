@@ -116,7 +116,14 @@ function installCommands(server: string, token: string) {
     `sh /tmp/bc-agent.qpkg; rm -f /tmp/bc-agent.qpkg\n` +
     `D="$(/sbin/getcfg BackupConsoleAgent Install_Path -f /etc/config/qpkg.conf)"\n` +
     `if [ -n "$D" ]; then sh "$D/bc-agent.sh" enroll -server "$S" -token "$T"; else echo "pacchetto non installato"; fi`;
-  return { windows, qnap };
+  const synology =
+    `# SSH sul NAS con un amministratore, poi "sudo -i". Installa in /usr/local/bc-agent con un servizio systemd.\n` +
+    `T='${token}'; S='${server}'\n` +
+    `case "$(uname -m)" in x86_64) A=amd64;; aarch64) A=arm64;; armv7l) A=armv7;; *) A=unsupported;; esac\n` +
+    `curl -fsS -H "X-Enroll-Token: $T" -o /tmp/bc-agent "$S/agent/v1/download/linux-$A" && chmod 755 /tmp/bc-agent \\\n` +
+    `  && /tmp/bc-agent install -server "$S" -token "$T"\n` +
+    `rm -f /tmp/bc-agent`;
+  return { windows, qnap, synology };
 }
 
 function SiteRow({ site, writable }: { site: Site; writable: boolean }) {
@@ -170,6 +177,13 @@ function SiteRow({ site, writable }: { site: Site; writable: boolean }) {
           <pre className="mono">{cmds.windows}</pre>
           <div className="label">NAS QNAP (SSH) <CopyButton text={cmds.qnap} /></div>
           <pre className="mono">{cmds.qnap}</pre>
+          <div className="label">NAS Synology, DSM 7 (SSH) <CopyButton text={cmds.synology} /></div>
+          <pre className="mono">{cmds.synology}</pre>
+          <div className="notice" style={{ marginBottom: 12 }}>
+            Synology, una sola volta dopo l'installazione: Pannello di controllo → Pianificazione attività → Crea →
+            Attività attivata → Script definito dall'utente, utente <strong>root</strong>, evento <strong>Avvio</strong>,
+            comando <code>/usr/local/bc-agent/ensure.sh</code>. Serve a ripristinare il servizio se un aggiornamento di DSM lo rimuove.
+          </div>
           <div className="label">Solo token (installazione manuale) <CopyButton text={token.token} /></div>
           <pre className="mono">{token.token}</pre>
           <div className="btn-row" style={{ justifyContent: "flex-end" }}>

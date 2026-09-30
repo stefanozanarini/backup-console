@@ -64,7 +64,7 @@ def hash_token(token: str) -> str:
 
 
 def kind_from_roles(roles: list[str]) -> DeviceKind:
-    if "qnap" in roles or "qnap_hero" in roles:
+    if "qnap" in roles or "qnap_hero" in roles or "synology" in roles:
         return DeviceKind.NAS
     if "veeam_vbr" in roles:
         return DeviceKind.SERVER

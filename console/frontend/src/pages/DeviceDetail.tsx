@@ -43,7 +43,9 @@ export default function DeviceDetailPage() {
   if (!d) return null;
 
   const volumes = d.inventory?.data.system?.volumes ?? [];
-  const qnap = d.inventory?.data.qnap;
+  // NAS: QNAP e Synology riportano dischi e RAID nello stesso formato.
+  const nas = d.inventory?.data.qnap ?? d.inventory?.data.synology;
+  const qnap = nas;
   const writable = canWrite(d.tenant_id);
 
   async function setStatus(action: "approve" | "revoke") {
@@ -244,7 +246,7 @@ export default function DeviceDetailPage() {
               </div>
             )}
             <div className="muted" style={{ marginTop: 10, fontSize: 12.5 }}>
-              Firmware {qnap.firmware ?? "—"} build {qnap.build ?? "—"}
+              {d.inventory?.data.synology ? qnap.firmware ?? "—" : <>Firmware {qnap.firmware ?? "—"} build {qnap.build ?? "—"}</>}
             </div>
           </section>
         </div>
