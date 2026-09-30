@@ -135,6 +135,80 @@ function duration(s: VeeamSession): string {
   return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")}`;
 }
 
+const SUMMARY_LABELS: [string, string][] = [
+  ["start", "Inizio"], ["end", "Fine"], ["duration", "Durata"], ["items", "Elementi"], ["files", "File copiati"],
+  ["size", "Dati copiati"], ["speed", "Velocità media"], ["execution", "Esecuzione"], ["shadow_copy", "Shadow Copy"],
+  ["windows_user", "Utente"],
+];
+
+function interval(h: number): string {
+  if (h >= 36) {
+    const d = h / 24;
+    return Math.abs(d - 7) < 1 ? "settimanale (circa 7 giorni)" : `circa ${Math.round(d)} giorni`;
+  }
+  return h >= 20 && h <= 28 ? "giornaliero" : `circa ${Math.round(h)} ore`;
+}
+
+/** Riepilogo del job: ultimo esito e i suoi avvisi; per Uranium anche il report elemento per elemento. */
+function JobSummary({ job }: { job: VeeamJob }) {
+  const d = job.details ?? {};
+  const rep = d.last_report;
+  const msgs = d.messages ?? [];
+  const summary = rep?.summary ?? {};
+  return (
+    <div className="problem-details" style={{ marginBottom: 4 }}>
+      <dl className="kv">
+        <dt>Ultima esecuzione</dt>
+        <dd>
+          <VeeamResultBadge result={job.last_result} enabled={job.enabled} running={d.running} />{" "}
+          {dateTime(job.last_end ?? job.last_start)}
+          {rep?.result && <span className="muted"> · {rep.result}</span>}
+          {d.last_manual && <span className="chip" style={{ marginLeft: 6 }}>avviata a mano</span>}
+        </dd>
+        <dt>Ultimo successo</dt><dd>{dateTime(job.last_success)}</dd>
+        {d.expected_interval_h ? <><dt>Frequenza abituale</dt><dd>{interval(d.expected_interval_h)}</dd></> : null}
+        {job.transferred_bytes != null && !rep && <><dt>Dati trasferiti</dt><dd>{bytes(job.transferred_bytes)}</dd></>}
+        {d.description && <><dt>Descrizione</dt><dd>{d.description}</dd></>}
+        {SUMMARY_LABELS.filter(([k]) => summary[k] != null && summary[k] !== "").map(([k, label]) => (
+          <Fragment key={k}><dt>{label}</dt><dd>{String(summary[k])}</dd></Fragment>
+        ))}
+        {d.service_installed === false && (
+          <><dt>Servizio</dt><dd>non installato: parte solo con un utente collegato e Uranium aperto</dd></>
+        )}
+      </dl>
+      {rep?.elements && rep.elements.length > 0 ? (
+        <table className="compact">
+          <thead><tr><th>Esito</th><th>Elemento</th><th>Destinazione</th><th>Dettagli</th><th>Ora</th></tr></thead>
+          <tbody>
+            {rep.elements.map((e, i) => (
+              <tr key={i}>
+                <td className="nowrap">
+                  <span className={`badge ${e.status === "ok" ? "good" : e.status === "error" ? "critical" : "warning"}`}>
+                    {e.status === "ok" ? "OK" : e.status === "error" ? "Errore" : "Avviso"}
+                  </span>
+                </td>
+                <td className="mono small">{e.element ?? "—"}</td>
+                <td className="mono small">{e.destination ?? "—"}</td>
+                <td className="small">{e.details ?? ""}</td>
+                <td className="nowrap small">{e.time ?? ""}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : msgs.length > 0 && (
+        <ul className="messages">
+          {msgs.map((m, i) => (
+            <li key={i} className={m.status ?? ""}>
+              <span className="msg-icon">{m.status === "error" ? "✖" : m.status === "warning" ? "⚠" : "•"}</span>
+              <span>{m.object && <strong>{m.object}: </strong>}{m.text}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 const PERIODS = [10, 30, 90, 365];
 
 interface StoredSession {
@@ -162,6 +236,7 @@ export function HistoryTable({ job, writable = false }: { job: VeeamJob; writabl
   const counts = history.reduce((c, s) => ({ ...c, [level(s)]: (c[level(s)] ?? 0) + 1 }), {} as Record<string, number>);
   return (
     <div className="stack" style={{ gap: 8 }}>
+      <JobSummary job={job} />
       {writable && job.enabled && job.product !== "uranium" && (
         <JobStartButton deviceId={job.device_id} jobKey={job.job_key} jobName={job.name} product={job.product}
           lastResult={job.last_result} running={job.details?.running} />

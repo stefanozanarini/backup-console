@@ -162,6 +162,19 @@ export interface VeeamJob {
   details?: {
     running?: boolean; running_since?: string | null; progress_pct?: number | null; retries_24h?: number;
     history?: VeeamSession[];
+    messages?: { object?: string | null; status?: string | null; text: string }[];
+    expected_interval_h?: number;
+    description?: string;
+    // Solo Uranium Backup
+    set_file?: string;
+    service_installed?: boolean;
+    last_manual?: boolean;
+    last_report?: {
+      result?: string | null;
+      warnings?: number;
+      summary?: Record<string, string | number | null>;
+      elements?: { status: "ok" | "warning" | "error"; element: string | null; destination: string | null; details: string | null; time: string | null }[];
+    };
   };
   device_name: string;
   tenant_name: string;
