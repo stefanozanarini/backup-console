@@ -120,9 +120,10 @@ function installCommands(server: string, token: string) {
     `# SSH sul NAS con un amministratore, poi "sudo -i". Installa in /usr/local/bc-agent con un servizio systemd.\n` +
     `T='${token}'; S='${server}'\n` +
     `case "$(uname -m)" in x86_64) A=amd64;; aarch64) A=arm64;; armv7l) A=armv7;; *) A=unsupported;; esac\n` +
-    `curl -fsS -H "X-Enroll-Token: $T" -o /tmp/bc-agent "$S/agent/v1/download/linux-$A" && chmod 755 /tmp/bc-agent \\\n` +
-    `  && /tmp/bc-agent install -server "$S" -token "$T"\n` +
-    `rm -f /tmp/bc-agent`;
+    // /tmp su DSM è montata noexec: si scarica direttamente nella cartella di installazione.
+    `mkdir -p /usr/local/bc-agent && curl -fsS -H "X-Enroll-Token: $T" -o /usr/local/bc-agent/bc-agent.new "$S/agent/v1/download/linux-$A" \\\n` +
+    `  && chmod 755 /usr/local/bc-agent/bc-agent.new && /usr/local/bc-agent/bc-agent.new install -server "$S" -token "$T"\n` +
+    `rm -f /usr/local/bc-agent/bc-agent.new`;
   return { windows, qnap, synology };
 }
 
