@@ -36,6 +36,7 @@ from app.schemas.ui import (
     BackupWindowState,
     DeviceDetail,
     DeviceOut,
+    DeviceUpdate,
     MeOut,
     ProblemOut,
     ProblemRow,
@@ -221,6 +222,25 @@ async def list_devices(
     site_ids = {d.site_id for d in devices}
     names = dict((await session.execute(select(Site.id, Site.name).where(Site.id.in_(site_ids)))).all()) if site_ids else {}
     return [DeviceOut.model_validate(d).model_copy(update={"site_name": names.get(d.site_id)}) for d in devices]
+
+
+@router.patch("/devices/{device_id}", response_model=DeviceOut)
+async def update_device(
+    device_id: uuid.UUID, body: DeviceUpdate, user: CurrentUserDep, session: SessionDep, request: Request
+):
+    """Nome mostrato in console (all'inizio è l'hostname; l'hostname resta quello del sistema)."""
+    device = await session.get(Device, device_id, options=[selectinload(Device.agent)])
+    if device is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "non trovato")
+    user.require_write(device.tenant_id)
+    name = " ".join(body.name.split())
+    if not name:
+        raise HTTPException(422, "nome vuoto")
+    old, device.name = device.name, name
+    audit(session, "device.rename", user_id=user.id, tenant_id=device.tenant_id, target=str(device.id),
+          ip=client_ip(request), old=old, new=name)
+    await session.commit()
+    return device
 
 
 @router.get("/devices/{device_id}", response_model=DeviceDetail)

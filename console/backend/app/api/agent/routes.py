@@ -215,6 +215,9 @@ async def inventory(env: Envelope[InventoryPayload], agent: ApprovedAgentDep, se
         return IngestResponse(accepted=True, duplicate=True)
     p = env.payload
     device = agent.device
+    # L'hostname segue il sistema (PC rinominato in Windows); il nome in console no.
+    if p.hostname:
+        device.hostname = p.hostname[:255]
     for field in ("model", "serial", "os_version"):
         if (value := getattr(p, field)) is not None:
             setattr(device, field, value[:200])

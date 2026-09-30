@@ -64,7 +64,7 @@ export default function DeviceDetailPage() {
       <div className="page-head">
         <div>
           <div className="sub"><Link to="/dispositivi">Dispositivi</Link> / {tenantName(d.tenant_id)}</div>
-          <h1>{d.name}</h1>
+          <DeviceName id={d.id} name={d.name} writable={writable} onSaved={() => { void device.reload(); notifyChange(); }} />
         </div>
         <ConnectivityBadge value={connectivity(d)} />
       </div>
@@ -285,5 +285,49 @@ function UpgradeControl(props: { deviceId: string; current: string | null; onErr
       <button className="btn" onClick={() => void upgrade()}>Aggiorna agente</button>
       {queued && <span className="muted">{queued}</span>}
     </div>
+  );
+}
+
+/** Nome del dispositivo in console, modificabile (l'hostname resta nei dettagli). */
+function DeviceName(props: { id: string; name: string; writable: boolean; onSaved: () => void }) {
+  const [editing, setEditing] = useState<string | null>(null);
+  const [error, setError] = useState<Error | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    if (editing === null) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api(`/devices/${props.id}`, { method: "PATCH", body: { name: editing } });
+      setEditing(null);
+      props.onSaved();
+    } catch (err) {
+      setError(err as Error);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (editing === null) {
+    return (
+      <div className="form-row" style={{ gap: 10 }}>
+        <h1>{props.name}</h1>
+        {props.writable && <button className="btn small" onClick={() => setEditing(props.name)}>Rinomina</button>}
+      </div>
+    );
+  }
+  return (
+    <form className="stack" style={{ gap: 6 }} onSubmit={save}>
+      <div className="form-row">
+        <input type="text" value={editing} maxLength={200} required autoFocus aria-label="Nome del dispositivo"
+          style={{ fontSize: 18, minWidth: 320 }} onChange={(e) => setEditing(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Escape") setEditing(null); }} />
+        <button className="btn primary" type="submit" disabled={busy || !editing.trim()}>Salva</button>
+        <button className="btn" type="button" onClick={() => setEditing(null)}>Annulla</button>
+      </div>
+      <ErrorBox error={error} />
+    </form>
   );
 }

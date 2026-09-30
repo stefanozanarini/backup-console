@@ -120,6 +120,10 @@ class DeviceOut(ORM):
     site_name: str | None = None
 
 
+class DeviceUpdate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+
+
 class DeviceDetail(DeviceOut):
     veeam: dict[str, Any] = {}
     inventory: dict[str, Any] | None = None

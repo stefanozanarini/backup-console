@@ -171,6 +171,14 @@ async def test_inventory_updates_device(client):
     device = (await client.get(f"/api/v1/devices/{data['device_id']}", headers=as_user())).json()
     assert device["model"] == "TS-873A" and device["kind"] == "nas"
     assert device["inventory"]["data"]["volumes"][0]["name"] == "DataVol1"
+
+    # Nome modificabile in console; l'hostname resta quello del sistema e segue l'inventario.
+    r = await client.patch(f"/api/v1/devices/{data['device_id']}", json={"name": "  NAS   ufficio  "}, headers=as_user())
+    assert r.status_code == 200 and r.json()["name"] == "NAS ufficio"
+    await client.post("/agent/v1/inventory", json=envelope({"hostname": "nas-new", "data": {}}), headers=auth)
+    device = (await client.get(f"/api/v1/devices/{data['device_id']}", headers=as_user())).json()
+    assert device["name"] == "NAS ufficio" and device["hostname"] == "nas-new"
+    assert (await client.patch(f"/api/v1/devices/{data['device_id']}", json={"name": "   "}, headers=as_user())).status_code == 422
     assert device["supremo_id"] is None
 
     # ID di Supremo dall'inventario; un agente vecchio (senza remote_access) non lo cancella.
