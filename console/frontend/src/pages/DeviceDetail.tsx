@@ -144,7 +144,7 @@ export default function DeviceDetailPage() {
         )}
       </section>
 
-      <VeeamSection device={d} />
+      <VeeamSection device={d} writable={writable} />
       <DeviceBackupWindow deviceId={d.id} writable={writable} />
       <VeeamCleanup device={d} writable={writable} />
 

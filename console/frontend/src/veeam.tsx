@@ -1,8 +1,9 @@
 import { Fragment, useState } from "react";
-import { useApi } from "./api";
-import { UsageBar } from "./components";
+import { api, useApi } from "./api";
+import { CommandStatusBadge, FINAL, useCommand } from "./CommandPanel";
+import { ErrorBox, UsageBar } from "./components";
 import { ago, bytes, dateTime } from "./format";
-import type { DeviceDetail, VeeamJob, VeeamResult, VeeamSession } from "./types";
+import type { Command, DeviceDetail, VeeamJob, VeeamResult, VeeamSession } from "./types";
 
 export function VeeamResultBadge({ result, enabled = true, running = false }: { result: VeeamResult | null; enabled?: boolean; running?: boolean }) {
   if (!enabled) return <span className="badge">Disabilitato</span>;
@@ -27,6 +28,53 @@ export function VeeamRunningBadge({ job }: { job: VeeamJob }) {
     <span className="badge" style={{ marginLeft: 4 }} title={job.details.running_since ? `avviato ${dateTime(job.details.running_since)}` : undefined}>
       In corso{pct != null ? ` ${pct}%` : ""}
     </span>
+  );
+}
+
+/** Rilancia un job Veeam: su B&R, se l'ultima sessione è fallita, solo gli oggetti falliti. */
+export function JobStartButton(props: {
+  deviceId: string; jobKey: string; jobName: string; product?: string; lastResult?: string | null; running?: boolean;
+}) {
+  const [cmdId, setCmdId] = useState<string | null>(null);
+  const [error, setError] = useState<Error | null>(null);
+  const [busy, setBusy] = useState(false);
+  const cmd = useCommand(cmdId);
+  const failed = ["failed", "warning"].includes((props.lastResult ?? "").toLowerCase());
+  const retry = props.product !== "vaw" && failed;
+  const label = retry ? "Riprova gli oggetti falliti" : "Avvia il backup ora";
+
+  async function start() {
+    const what = retry
+      ? `Riprovare adesso il job "${props.jobName}" solo per gli oggetti falliti dell'ultima esecuzione?`
+      : `Avviare adesso il job "${props.jobName}"?`;
+    if (!window.confirm(what)) return;
+    setError(null);
+    setBusy(true);
+    try {
+      const c = await api<Command>(`/devices/${props.deviceId}/veeam/jobs/start`, {
+        method: "POST", body: { job_key: props.jobKey, mode: "auto" },
+      });
+      setCmdId(c.id);
+    } catch (e) {
+      setError(e as Error);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const pending = !!cmd && !FINAL.includes(cmd.status);
+  return (
+    <div className="form-row" style={{ gap: 8 }}>
+      <button type="button" className="btn small" disabled={busy || pending || props.running}
+        title={props.running ? "Il job è già in esecuzione" : undefined}
+        onClick={(e) => { e.stopPropagation(); void start(); }}>
+        {label}
+      </button>
+      {cmd && <CommandStatusBadge status={cmd.status} />}
+      {cmd?.status === "succeeded" && <span className="muted small">job avviato: l'esito arriverà con i prossimi report</span>}
+      {cmd?.error && <span className="badge critical">{cmd.error}</span>}
+      <ErrorBox error={error} />
+    </div>
   );
 }
 
@@ -96,7 +144,7 @@ interface StoredSession {
 }
 
 /** Sessioni salvate in console: restano anche dopo che Veeam le ha cancellate. */
-export function HistoryTable({ job }: { job: VeeamJob }) {
+export function HistoryTable({ job, writable = false }: { job: VeeamJob; writable?: boolean }) {
   const [days, setDays] = useState(HISTORY_DAYS);
   const stored = useApi<StoredSession[]>(
     `/veeam/sessions?device_id=${job.device_id}&job_key=${encodeURIComponent(job.job_key)}&days=${days}`, 60000,
@@ -114,6 +162,10 @@ export function HistoryTable({ job }: { job: VeeamJob }) {
   const counts = history.reduce((c, s) => ({ ...c, [level(s)]: (c[level(s)] ?? 0) + 1 }), {} as Record<string, number>);
   return (
     <div className="stack" style={{ gap: 8 }}>
+      {writable && job.enabled && (
+        <JobStartButton deviceId={job.device_id} jobKey={job.job_key} jobName={job.name} product={job.product}
+          lastResult={job.last_result} running={job.details?.running} />
+      )}
       <div className="form-row small">
         <select value={days} onChange={(e) => setDays(Number(e.target.value))} aria-label="Periodo">
           {PERIODS.map((d) => <option key={d} value={d}>ultimi {d} giorni</option>)}
@@ -158,7 +210,7 @@ export function HistoryTable({ job }: { job: VeeamJob }) {
   );
 }
 
-export function VeeamSection({ device }: { device: DeviceDetail }) {
+export function VeeamSection({ device, writable = false }: { device: DeviceDetail; writable?: boolean }) {
   const v = device.veeam;
   const jobs = useApi<VeeamJob[]>(v.product ? `/veeam/jobs?device_id=${device.id}` : null, 60000);
   const [open, setOpen] = useState<string | null>(null);
@@ -199,7 +251,7 @@ export function VeeamSection({ device }: { device: DeviceDetail }) {
               </tr>
               {open === j.id && (
                 <tr className="detail-row">
-                  <td colSpan={7}><HistoryTable job={j} /></td>
+                  <td colSpan={7}><HistoryTable job={j} writable={writable} /></td>
                 </tr>
               )}
               </Fragment>

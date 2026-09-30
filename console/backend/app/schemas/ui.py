@@ -204,6 +204,12 @@ class VeeamCleanupScanIn(BaseModel):
     older_than_days: int = Field(30, ge=7, le=3650)
 
 
+class VeeamJobStartIn(BaseModel):
+    job_key: str = Field(min_length=1, max_length=200)
+    # auto: retry degli oggetti falliti se l'ultima sessione B&R è fallita/con avvisi, altrimenti avvio.
+    mode: Literal["auto", "retry", "start"] = "auto"
+
+
 class VeeamCleanupIn(BaseModel):
     scan_id: uuid.UUID
     backup_ids: list[str] = Field(min_length=1, max_length=500)

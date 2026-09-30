@@ -26,6 +26,8 @@ var guidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[
 
 func (c *Collector) IsVBR() bool { return c.product == "vbr" }
 
+func (c *Collector) Product() string { return c.product }
+
 func checkDays(days int) error {
 	if days < MinOlderThanDays {
 		return fmt.Errorf("la soglia minima è %d giorni", MinOlderThanDays)

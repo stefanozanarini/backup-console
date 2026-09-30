@@ -288,3 +288,32 @@ async def test_veeam_licenses(client):
     r2["payload"]["product"] = "vaw"
     await client.post("/agent/v1/veeam", headers=auth2, json=r2)
     assert len((await client.get("/api/v1/veeam/licenses", headers=as_user())).json()) == 1
+
+
+async def test_veeam_job_start(client):
+    data, auth = await approved_agent(client, roles=("veeam_vbr",))
+    dev = data["device_id"]
+    failed = job("0b5c1f3e-2a4d-4c6e-9f10-1a2b3c4d5e6f", "Failed", 100)
+    ok = job("11111111-2222-3333-4444-555555555555", "Success")
+    running = job("22222222-2222-3333-4444-555555555555", "Success")
+    running["details"] = {"running": True}
+    off = job("33333333-2222-3333-4444-555555555555", "Failed", enabled=False)
+    await client.post("/agent/v1/veeam", headers=auth, json=veeam_report([failed, ok, running, off]))
+
+    # Il problema del job fallito porta con sé l'id del job, per il pulsante in console.
+    p = next(p for p in (await client.get("/api/v1/problems", headers=as_user())).json() if p["check"] == "veeam.job_result")
+    assert p["details"]["job_key"] == failed["id"]
+
+    url = f"/api/v1/devices/{dev}/veeam/jobs/start"
+    r = await client.post(url, json={"job_key": failed["id"]}, headers=as_user())
+    assert r.status_code == 201, r.text
+    assert r.json()["payload"]["mode"] == "retry" and r.json()["reason"] == "retry degli oggetti falliti del job Job 0b5c1f3e-2a4d-4c6e-9f10-1a2b3c4d5e6f"
+    # Già richiesto e non ancora eseguito: niente doppioni.
+    assert (await client.post(url, json={"job_key": failed["id"]}, headers=as_user())).status_code == 409
+    cmd = (await client.get("/agent/v1/commands/next?wait=0", headers=auth)).json()
+    assert cmd["type"] == "veeam_job_start" and cmd["payload"]["product"] == "vbr"
+
+    assert (await client.post(url, json={"job_key": ok["id"]}, headers=as_user())).json()["payload"]["mode"] == "start"
+    assert (await client.post(url, json={"job_key": running["id"]}, headers=as_user())).status_code == 409
+    assert (await client.post(url, json={"job_key": off["id"]}, headers=as_user())).status_code == 409
+    assert (await client.post(url, json={"job_key": "nope"}, headers=as_user())).status_code == 404

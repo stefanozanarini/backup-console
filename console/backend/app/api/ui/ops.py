@@ -51,6 +51,7 @@ from app.schemas.ui import (
     UpgradeResult,
     VeeamCleanupIn,
     VeeamCleanupScanIn,
+    VeeamJobStartIn,
     VeeamJobOut,
     VeeamJobRow,
     VeeamLicenseRow,
@@ -458,6 +459,52 @@ async def _vbr_device(session: AsyncSession, device_id: uuid.UUID, user: Current
     if (device.veeam or {}).get("product") != "vbr":
         raise HTTPException(status.HTTP_409_CONFLICT, "il dispositivo non è un server Veeam Backup & Replication")
     return device
+
+
+RETRYABLE_TYPES = {"backup", "computerbackup", "agentbackup", "vmbackup"}
+
+
+@router.post("/devices/{device_id}/veeam/jobs/start", response_model=CommandOut, status_code=201)
+async def veeam_job_start(
+    device_id: uuid.UUID, body: VeeamJobStartIn, user: CurrentUserDep, session: SessionDep, request: Request
+):
+    """Rilancia un job Veeam (es. dopo un backup fallito): parte in background sul server/PC."""
+    device = await _device_with_agent(session, device_id, user)
+    user.require_write(device.tenant_id)
+    if device.agent is None or device.agent.status != AgentStatus.APPROVED:
+        raise HTTPException(status.HTTP_409_CONFLICT, "agente non approvato")
+    job = await session.scalar(select(VeeamJob).where(VeeamJob.device_id == device.id, VeeamJob.job_key == body.job_key))
+    if job is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "job non trovato")
+    if not job.enabled:
+        raise HTTPException(status.HTTP_409_CONFLICT, "il job è disabilitato in Veeam")
+    if (job.details or {}).get("running"):
+        raise HTTPException(status.HTTP_409_CONFLICT, "il job è già in esecuzione")
+    pending = await session.scalar(
+        select(Command).where(
+            Command.device_id == device.id, Command.type == CommandType.VEEAM_JOB_START,
+            Command.status.in_([CommandStatus.QUEUED, CommandStatus.DISPATCHED, CommandStatus.RUNNING]),
+            Command.payload["job_key"].astext == job.job_key,
+        )
+    )
+    if pending is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "avvio del job già richiesto, in attesa dell'agente")
+    mode = body.mode
+    if mode == "auto":
+        failed = (job.last_result or "").lower() in ("failed", "warning")
+        mode = "retry" if job.product == "vbr" and failed and (job.job_type or "").lower() in RETRYABLE_TYPES else "start"
+    what = "retry degli oggetti falliti" if mode == "retry" else "avvio"
+    cmd = Command(
+        tenant_id=device.tenant_id, device_id=device.id, agent_id=device.agent.id, type=CommandType.VEEAM_JOB_START,
+        payload={"product": job.product, "job_key": job.job_key, "job_name": job.name, "mode": mode},
+        timeout_s=300, reason=f"{what} del job {job.name}", created_by=user.id,
+    )
+    session.add(cmd)
+    await session.flush()
+    audit(session, "veeam.job_start", user_id=user.id, agent_id=device.agent.id, tenant_id=device.tenant_id,
+          target=f"{device.name}:{job.name}", ip=client_ip(request), mode=mode, command_id=str(cmd.id))
+    await session.commit()
+    return cmd
 
 
 @router.post("/devices/{device_id}/veeam/cleanup-scan", response_model=CommandOut, status_code=201)

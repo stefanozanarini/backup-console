@@ -15,7 +15,7 @@ function bucket(j: VeeamJob): Bucket {
 }
 
 export default function Backup() {
-  const { tenants } = useConsole();
+  const { tenants, canWrite } = useConsole();
   const [params, setParams] = useSearchParams();
   const tenant = params.get("tenant") ?? "";
   const result = (params.get("result") ?? "") as Bucket | "";
@@ -99,7 +99,7 @@ export default function Backup() {
               </tr>
               {open === j.id && (
                 <tr className="detail-row">
-                  <td colSpan={9}><HistoryTable job={j} /></td>
+                  <td colSpan={9}><HistoryTable job={j} writable={canWrite(j.tenant_id)} /></td>
                 </tr>
               )}
               </Fragment>

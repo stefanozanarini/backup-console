@@ -31,6 +31,8 @@ function commandLabel(c: Command): string {
       return `analisi backup Veeam (più vecchi di ${c.payload.older_than_days} giorni)`;
     case "veeam_cleanup":
       return `pulizia backup Veeam: ${c.payload.backup_ids?.length ?? 0} backup`;
+    case "veeam_job_start":
+      return `${c.payload.mode === "retry" ? "retry" : "avvio"} del job Veeam ${c.payload.job_name ?? ""}`;
     default:
       return c.payload.command ?? "";
   }

@@ -5,6 +5,7 @@ import { Empty, ErrorBox, SeverityBadge, StateBadge } from "../components";
 import { useConsole } from "../context";
 import { ago, dateTime } from "../format";
 import type { Problem, TenantSummary } from "../types";
+import { JobStartButton } from "../veeam";
 
 const STATE_FILTERS = {
   open: "state=open",
@@ -13,7 +14,7 @@ const STATE_FILTERS = {
 type StateFilter = keyof typeof STATE_FILTERS;
 
 export default function Problems() {
-  const { tenants } = useConsole();
+  const { tenants, canWrite } = useConsole();
   const [params, setParams] = useSearchParams();
   const tenant = params.get("tenant") ?? "";
   const severity = params.get("severity") ?? "";
@@ -118,7 +119,7 @@ export default function Problems() {
               </tr>
               {open === p.id && (
                 <tr className="detail-row">
-                  <td colSpan={7}><ProblemDetails problem={p} /></td>
+                  <td colSpan={7}><ProblemDetails problem={p} writable={canWrite(p.tenant_id)} /></td>
                 </tr>
               )}
               </Fragment>
@@ -143,16 +144,23 @@ const DETAIL_LABELS: Record<string, string> = {
   error: "Errore", collector: "Raccolta", at: "Quando", reported_at: "Ultimo report ricevuto",
   agent_version: "Versione agente", last_seen_at: "Ultimo contatto", until: "Fine della finestra",
 };
-const HIDDEN = new Set(["messages", "sessions"]);
+const HIDDEN = new Set(["messages", "sessions", "job_key"]);
 
-function ProblemDetails({ problem }: { problem: Problem }) {
+const JOB_CHECKS = new Set(["veeam.job_result", "veeam.job_retry", "veeam.last_success_age_h"]);
+
+function ProblemDetails({ problem, writable }: { problem: Problem; writable: boolean }) {
   const d = problem.details ?? {};
   const messages = Array.isArray(d.messages) ? (d.messages as Message[]) : [];
   const sessions = Array.isArray(d.sessions) ? (d.sessions as SessionInfo[]) : [];
   const fields = Object.entries(d).filter(([k, v]) => !HIDDEN.has(k) && v !== null && v !== "" && typeof v !== "object");
 
+  const jobKey = typeof d.job_key === "string" ? d.job_key : null;
   return (
     <div className="problem-details">
+      {writable && jobKey && JOB_CHECKS.has(problem.check) && problem.state === "open" && (
+        <JobStartButton deviceId={problem.device_id} jobKey={jobKey} jobName={String(d.job ?? "")}
+          product={jobKey.startsWith("vaw:") ? "vaw" : "vbr"} lastResult={typeof d.result === "string" ? d.result : null} />
+      )}
       {messages.length > 0 && (
         <ul className="messages">
           {messages.map((m, i) => (

@@ -165,10 +165,11 @@ export interface Command {
   id: string;
   tenant_id: string;
   device_id: string;
-  type: "exec" | "upgrade" | "veeam_scan" | "veeam_cleanup";
+  type: "exec" | "upgrade" | "veeam_scan" | "veeam_cleanup" | "veeam_job_start";
   payload: {
     command?: string; shell?: string; version?: string; from?: string;
     older_than_days?: number; backup_ids?: string[]; total_bytes?: number;
+    job_name?: string; mode?: string; product?: string; job_key?: string;
   };
   status: CommandStatus;
   timeout_s: number;

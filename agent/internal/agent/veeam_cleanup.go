@@ -117,3 +117,41 @@ func countResults(res map[string]any) (deleted, skipped, failed int) {
 	}
 	return
 }
+
+func (a *Agent) veeamCollector(product string) *veeam.Collector {
+	for _, c := range a.collectors {
+		if v, ok := c.(*veeam.Collector); ok && v.Product() == product {
+			return v
+		}
+	}
+	return nil
+}
+
+// runVeeamJobStart avvia un job Veeam chiesto dalla console (es. dopo un backup fallito).
+func (a *Agent) runVeeamJobStart(ctx context.Context, cmd client.Command) {
+	product, _ := cmd.Payload["product"].(string)
+	jobKey, _ := cmd.Payload["job_key"].(string)
+	jobName, _ := cmd.Payload["job_name"].(string)
+	mode, _ := cmd.Payload["mode"].(string)
+	v := a.veeamCollector(product)
+	if v == nil {
+		a.finish(ctx, cmd.ID, false, nil, "Veeam ("+product+") non rilevato su questo dispositivo")
+		return
+	}
+	cctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+	sink := a.output(ctx, cmd.ID)
+	log.Printf("comando %s: avvio del job Veeam %q (%s)", cmd.ID, jobName, mode)
+	sink(fmt.Sprintf("avvio del job %s (%s)…\n", jobName, map[string]string{"retry": "solo gli oggetti falliti", "start": "esecuzione completa"}[mode]))
+	res, err := v.StartJob(cctx, jobKey, jobName, mode)
+	if err != nil {
+		a.finish(ctx, cmd.ID, false, nil, err.Error())
+		return
+	}
+	if note, _ := res["note"].(string); note != "" {
+		sink(note + "\n")
+	}
+	sink("job avviato: l'esito arriverà con i prossimi report Veeam\n")
+	zero := 0
+	a.finishWithResult(ctx, cmd.ID, true, &zero, "", res)
+}

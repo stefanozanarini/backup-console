@@ -14,6 +14,7 @@ class CommandType(StrEnum):
     UPGRADE = "upgrade"  # aggiornamento dell'agente
     VEEAM_SCAN = "veeam_scan"  # analisi (solo lettura) dei backup eliminabili
     VEEAM_CLEANUP = "veeam_cleanup"  # eliminazione tramite Veeam dei backup scelti
+    VEEAM_JOB_START = "veeam_job_start"  # avvio (o retry) di un job Veeam
 
 
 class CommandStatus(StrEnum):

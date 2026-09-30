@@ -61,3 +61,30 @@ func TestCleanupDeleteQuotesOnlyGUIDs(t *testing.T) {
 		}
 	}
 }
+
+func TestStartJobValidation(t *testing.T) {
+	var got string
+	vbr := &Collector{product: "vbr", run: func(_ context.Context, s string) ([]byte, error) {
+		got = s
+		return []byte(`{"started":true}`), nil
+	}}
+	if _, err := vbr.StartJob(context.Background(), "x'; Remove-Item C:\\ -Recurse; '", "", "start"); err == nil {
+		t.Fatal("id non GUID accettato")
+	}
+	if _, err := vbr.StartJob(context.Background(), "0b5c1f3e-2a4d-4c6e-9f10-1a2b3c4d5e6f", "", "boom"); err == nil {
+		t.Fatal("modalità non valida accettata")
+	}
+	if _, err := vbr.StartJob(context.Background(), "0b5c1f3e-2a4d-4c6e-9f10-1a2b3c4d5e6f", "", "retry"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "$JobId = '0b5c1f3e-2a4d-4c6e-9f10-1a2b3c4d5e6f'") || !strings.Contains(got, "$Mode = 'retry'") {
+		t.Fatal("parametri non passati allo script")
+	}
+	vaw := &Collector{product: "vaw", run: vbr.run}
+	if _, err := vaw.StartJob(context.Background(), "vaw:Backup-OPT", "Backup'OPT", "start"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "$JobName = 'BackupOPT'") {
+		t.Fatal("apice non rimosso dal nome")
+	}
+}

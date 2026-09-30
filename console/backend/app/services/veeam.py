@@ -176,8 +176,8 @@ async def _evaluate_job(session: AsyncSession, device: Device, job: VeeamJob, no
         await resolve_problem(session, device.id, "veeam.job_result", labels)
     else:
         esito = "fallito" if severity == Severity.CRITICAL else "completato con avvisi"
-        details = {"job": job.name, "result": job.last_result, "last_end": job.last_end.isoformat() if job.last_end else None,
-                   "messages": _messages(job)}
+        details = {"job": job.name, "job_key": job.job_key, "result": job.last_result,
+                   "last_end": job.last_end.isoformat() if job.last_end else None, "messages": _messages(job)}
         await raise_problem(session, device, "veeam.job_result", severity, f"Job {job.name}: {esito}", labels, details)
 
     # Retry nelle ultime 24 ore: segnale di un problema anche se il job alla fine riesce.
@@ -188,7 +188,7 @@ async def _evaluate_job(session: AsyncSession, device: Device, job: VeeamJob, no
         await raise_problem(
             session, device, "veeam.job_retry", Severity.WARNING,
             f"Job {job.name}: {retries} retry nelle ultime 24 ore", labels,
-            {"job": job.name, "retries": retries, "sessions": sessions[-20:]},
+            {"job": job.name, "job_key": job.job_key, "retries": retries, "sessions": sessions[-20:]},
         )
     else:
         await resolve_problem(session, device.id, "veeam.job_retry", labels)
@@ -207,7 +207,7 @@ async def _evaluate_job(session: AsyncSession, device: Device, job: VeeamJob, no
         await raise_problem(
             session, device, "veeam.last_success_age_h", sev,
             f"Job {job.name}: nessun backup riuscito da {age_h:.0f} ore", labels,
-            {"job": job.name, "last_success": job.last_success.isoformat(), "warn": warn, "crit": crit},
+            {"job": job.name, "job_key": job.job_key, "last_success": job.last_success.isoformat(), "warn": warn, "crit": crit},
         )
 
 

@@ -50,6 +50,16 @@ func (a *Agent) commandLoop(ctx context.Context) {
 			}
 		case "upgrade":
 			a.runUpgrade(ctx, cmd)
+		case "veeam_job_start":
+			select {
+			case a.execSlots <- struct{}{}:
+				go func() {
+					defer func() { <-a.execSlots }()
+					a.runVeeamJobStart(ctx, cmd)
+				}()
+			case <-ctx.Done():
+				return
+			}
 		case "veeam_scan", "veeam_cleanup":
 			select {
 			case a.execSlots <- struct{}{}:
