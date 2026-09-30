@@ -39,6 +39,7 @@ is_running() {
 }
 
 supervise() {
+	trap '' HUP
 	trap 'kill "$(cat "$AGENT_PID" 2>/dev/null)" 2>/dev/null; rm -f "$AGENT_PID"; exit 0' TERM INT
 	while :; do
 		rotate_log
@@ -70,8 +71,10 @@ start() {
 		return 0
 	fi
 	# Processo separato: così in ps non compaiono gli argomenti del comando chiamante
-	# (es. il token di enroll).
-	"$0" _supervise </dev/null >/dev/null 2>&1 &
+	# (es. il token di enroll). SIGHUP ignorato: se l'avvio parte da una sessione SSH
+	# (enroll, restart a mano), chiudere il terminale non deve fermare l'agente. Un
+	# segnale ignorato resta tale anche nei processi avviati dopo (agente compreso).
+	( trap '' HUP; exec "$0" _supervise </dev/null >/dev/null 2>&1 ) &
 	echo $! >"$SUP_PID"
 	log "avviato (supervisore pid $!)"
 	echo "$QPKG_NAME: avviato"
