@@ -45,6 +45,7 @@ func (c *Collector) Inventory(ctx context.Context) (collector.Inventory, error) 
 		"os":      runtime.GOOS,
 		"arch":    runtime.GOARCH,
 		"volumes": vols,
+		"network": networks(),
 	}
 	if ra := remoteAccess(); ra != nil {
 		// Sempre presente su Windows (anche vuoto): la console distingue "non installato"

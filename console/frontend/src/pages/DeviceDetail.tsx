@@ -87,6 +87,15 @@ export default function DeviceDetailPage() {
                 </dd>
               </>
             )}
+            <dt>Indirizzi IP</dt>
+            <dd>
+              {(d.ip_addresses ?? []).length === 0 ? "—" : (d.ip_addresses ?? []).map((n) => (
+                <div key={n.name + (n.mac ?? "")}>
+                  <span className="mono">{n.ipv4.join(", ")}</span>{" "}
+                  <span className="muted small">{n.name}{n.mac ? ` · ${n.mac}` : ""}</span>
+                </div>
+              ))}
+            </dd>
             <dt>Sistema</dt><dd>{d.os_version ?? "—"}</dd>
             <dt>Piattaforma</dt><dd>{d.platform} / {d.arch}</dd>
             <dt>Inventario</dt><dd>{ago(d.inventory_at)}</dd>

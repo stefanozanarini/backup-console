@@ -1,6 +1,9 @@
 package system
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestUsedPctMatchesDf(t *testing.T) {
 	// 100 blocchi, 20 liberi di cui 15 disponibili ai non-root: df mostra 80/(80+15) = 84%.
@@ -17,6 +20,16 @@ func TestCleanID(t *testing.T) {
 	for in, want := range map[string]string{"431202296": "431202296", " 431 202 296 ": "431202296", "12": "", "": ""} {
 		if got := cleanID(in); got != want {
 			t.Errorf("cleanID(%q) = %q, atteso %q", in, got, want)
+		}
+	}
+}
+
+func TestNetworksSkipsLoopback(t *testing.T) {
+	for _, n := range networks() {
+		for _, ip := range n.IPv4 {
+			if strings.HasPrefix(ip, "127.") || strings.HasPrefix(ip, "169.254.") {
+				t.Fatalf("indirizzo da escludere: %s (%s)", ip, n.Name)
+			}
 		}
 	}
 }

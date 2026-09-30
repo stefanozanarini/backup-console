@@ -218,11 +218,21 @@ async def inventory(env: Envelope[InventoryPayload], agent: ApprovedAgentDep, se
     for field in ("model", "serial", "os_version"):
         if (value := getattr(p, field)) is not None:
             setattr(device, field, value[:200])
-    # remote_access c'è solo con agenti che lo rilevano: se manca non tocchiamo il valore.
-    ra = p.data.get("remote_access")
+    # L'agente raggruppa i dati per collector (data["system"], data["veeam_vbr"], ...).
+    sysdata = p.data.get("system") if isinstance(p.data.get("system"), dict) else {}
+    # remote_access e network ci sono solo con agenti che li rilevano: se mancano non
+    # tocchiamo i valori salvati.
+    ra = sysdata.get("remote_access")
     if isinstance(ra, dict):
         sid = ra.get("supremo_id")
         device.supremo_id = str(sid)[:32] if isinstance(sid, (str, int)) and str(sid).isdigit() else None
+    nics = sysdata.get("network")
+    if isinstance(nics, list):
+        device.ip_addresses = [
+            {"name": str(n.get("name", ""))[:100], "mac": str(n.get("mac") or "")[:32] or None,
+             "ipv4": [str(ip)[:45] for ip in (n.get("ipv4") or [])][:10]}
+            for n in nics[:20] if isinstance(n, dict)
+        ]
     session.add(InventorySnapshot(device_id=device.id, collected_at=env.ts, data=p.model_dump()))
     await session.commit()
     return IngestResponse(accepted=True)

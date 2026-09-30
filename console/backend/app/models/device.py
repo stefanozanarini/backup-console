@@ -38,6 +38,8 @@ class Device(UUIDPk, Base):
     os_version: Mapped[str | None] = mapped_column(String(200))
     # ID di Supremo (assistenza remota) letto dal registro dall'agente, se installato.
     supremo_id: Mapped[str | None] = mapped_column(String(32))
+    # Schede di rete dall'inventario: [{"name", "mac", "ipv4": [...]}].
+    ip_addresses: Mapped[list[Any] | None] = mapped_column(nullable=True)
     # Finestra di backup del PC: None = eredita dal tenant; {"enabled": false} = nessuna.
     backup_window: Mapped[dict[str, Any] | None] = mapped_column(nullable=True)
     # Ultimo report Veeam: prodotto, versione, repository, licenza (i job sono in veeam_jobs).

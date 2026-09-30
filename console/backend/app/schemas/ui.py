@@ -114,6 +114,7 @@ class DeviceOut(ORM):
     serial: str | None
     os_version: str | None
     supremo_id: str | None = None
+    ip_addresses: list[Any] | None = None
     last_seen_at: datetime | None
     agent: AgentOut | None
     site_name: str | None = None

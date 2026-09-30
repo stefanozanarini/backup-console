@@ -174,13 +174,15 @@ async def test_inventory_updates_device(client):
     assert device["supremo_id"] is None
 
     # ID di Supremo dall'inventario; un agente vecchio (senza remote_access) non lo cancella.
-    inv = envelope({"data": {"remote_access": {"supremo_id": "431202296"}}})
+    # Stessa struttura dell'agente: dati raggruppati per collector.
+    nics = [{"name": "Ethernet", "mac": "00:15:5d:01:02:03", "ipv4": ["192.168.50.10"]}]
+    inv = envelope({"data": {"system": {"remote_access": {"supremo_id": "431202296"}, "network": nics}}})
     await client.post("/agent/v1/inventory", json=inv, headers=auth)
-    await client.post("/agent/v1/inventory", json=envelope({"data": {}}), headers=auth)
+    await client.post("/agent/v1/inventory", json=envelope({"data": {"system": {}}}), headers=auth)
     [d] = (await client.get("/api/v1/devices", headers=as_user())).json()
-    assert d["supremo_id"] == "431202296"
+    assert d["supremo_id"] == "431202296" and d["ip_addresses"] == nics
     # Supremo disinstallato: remote_access vuoto.
-    await client.post("/agent/v1/inventory", json=envelope({"data": {"remote_access": {}}}), headers=auth)
+    await client.post("/agent/v1/inventory", json=envelope({"data": {"system": {"remote_access": {}}}}), headers=auth)
     assert (await client.get(f"/api/v1/devices/{data['device_id']}", headers=as_user())).json()["supremo_id"] is None
 
 

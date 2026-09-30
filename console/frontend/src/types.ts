@@ -61,6 +61,7 @@ export interface Device {
   agent: Agent | null;
   site_name?: string | null;
   supremo_id?: string | null;
+  ip_addresses?: { name: string; mac: string | null; ipv4: string[] }[] | null;
 }
 
 export interface Volume {
