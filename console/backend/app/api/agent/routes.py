@@ -255,7 +255,8 @@ async def metrics(env: Envelope[MetricsPayload], agent: ApprovedAgentDep, sessio
     return IngestResponse(accepted=True)
 
 
-COLLECTOR_LABELS = {"veeam_vbr": "Veeam B&R", "veeam_vaw": "Veeam Agent", "uranium": "Uranium Backup"}
+COLLECTOR_LABELS = {"veeam_vbr": "Veeam B&R", "veeam_vaw": "Veeam Agent", "uranium": "Uranium Backup",
+                    "synology": "Hyper Backup"}
 
 
 @router.post("/events", response_model=IngestResponse)
@@ -286,24 +287,34 @@ async def events(env: Envelope[EventsPayload], agent: ApprovedAgentDep, session:
     return IngestResponse(accepted=True)
 
 
-@router.post("/uranium", response_model=IngestResponse)
-async def uranium(env: Envelope[VeeamPayload], agent: ApprovedAgentDep, session: SessionDep):
-    """Uranium Backup: stesso formato e stessi controlli dei job Veeam."""
-    if not await _first_delivery(session, agent, env.msg_id, "uranium"):
+async def _app_report(product: str, env: Envelope[VeeamPayload], agent, session: AsyncSession) -> IngestResponse:
+    if not await _first_delivery(session, agent, env.msg_id, product):
         return IngestResponse(accepted=True, duplicate=True)
-    if env.payload.product != "uranium":
+    if env.payload.product != product:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "prodotto non valido per questo endpoint")
     await veeam_service.ingest(session, agent.device, env.payload, env.ts)
     await session.commit()
     return IngestResponse(accepted=True)
 
 
+@router.post("/uranium", response_model=IngestResponse)
+async def uranium(env: Envelope[VeeamPayload], agent: ApprovedAgentDep, session: SessionDep):
+    """Uranium Backup: stesso formato e stessi controlli dei job Veeam."""
+    return await _app_report("uranium", env, agent, session)
+
+
+@router.post("/hyperbackup", response_model=IngestResponse)
+async def hyperbackup(env: Envelope[VeeamPayload], agent: ApprovedAgentDep, session: SessionDep):
+    """Hyper Backup dei NAS Synology: stesso formato e stessi controlli dei job Veeam."""
+    return await _app_report("hyperbackup", env, agent, session)
+
+
 @router.post("/veeam", response_model=IngestResponse)
 async def veeam(env: Envelope[VeeamPayload], agent: ApprovedAgentDep, session: SessionDep):
     if not await _first_delivery(session, agent, env.msg_id, "veeam"):
         return IngestResponse(accepted=True, duplicate=True)
-    if env.payload.product == "uranium":
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Uranium va inviato a /agent/v1/uranium")
+    if env.payload.product not in ("vbr", "vaw"):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"{env.payload.product} ha un endpoint proprio")
     await veeam_service.ingest(session, agent.device, env.payload, env.ts)
     await session.commit()
     return IngestResponse(accepted=True)

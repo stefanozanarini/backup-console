@@ -7,6 +7,8 @@ import { ago, bytes, dateTime } from "../format";
 import type { VeeamJob } from "../types";
 import { HistoryStrip, HistoryTable, VeeamResultBadge, VeeamRunningBadge } from "../veeam";
 
+const PRODUCT_CHIP: Record<string, string> = { vbr: "B&R", vaw: "Agent", uranium: "Uranium", hyperbackup: "Hyper Backup" };
+
 type Bucket = "success" | "warning" | "failed" | "none";
 
 function bucket(j: VeeamJob): Bucket {
@@ -52,7 +54,7 @@ export default function Backup() {
       <div className="page-head">
         <div>
           <h1>Backup</h1>
-          <div className="sub">Ultimo esito di ogni job: Veeam Backup &amp; Replication, Veeam Agent e Uranium Backup</div>
+          <div className="sub">Ultimo esito di ogni job: Veeam Backup &amp; Replication, Veeam Agent, Uranium Backup e Hyper Backup</div>
         </div>
       </div>
       <div className="tiles">
@@ -88,7 +90,7 @@ export default function Backup() {
                 }}
               >
                 <td className="nowrap"><span className="chevron" aria-hidden="true">{open === j.id ? "▾" : "▸"}</span> <VeeamResultBadge result={j.last_result} enabled={j.enabled} running={j.details?.running} /><VeeamRunningBadge job={j} /></td>
-                <td>{j.name} <span className="chip">{j.product === "vbr" ? "B&R" : j.product === "uranium" ? "Uranium" : "Agent"}</span></td>
+                <td>{j.name} <span className="chip">{PRODUCT_CHIP[j.product] ?? j.product}</span></td>
                 <td className="nowrap"><Link to={`/dispositivi/${j.device_id}`}>{j.device_name}</Link></td>
                 <td className="nowrap">{j.tenant_name}</td>
                 <td className="nowrap">{j.site_name}</td>

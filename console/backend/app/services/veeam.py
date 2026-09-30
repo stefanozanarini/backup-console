@@ -14,6 +14,8 @@ from app.schemas.agent import VeeamPayload
 from app.services.problems import evaluate_metrics, raise_problem, resolve_problem, thresholds_for
 
 RESULT_SEVERITY = {"failed": Severity.CRITICAL, "warning": Severity.WARNING}
+# Altri software di backup → collector dell'agente che li riporta.
+APPS = {"uranium": "uranium", "hyperbackup": "synology"}
 JOB_CHECKS = ("veeam.job_result", "veeam.last_success_age_h", "veeam.job_retry")
 MAX_MESSAGES = 30
 
@@ -136,12 +138,13 @@ async def ingest(session: AsyncSession, device: Device, p: VeeamPayload, ts: dat
                 await resolve_problem(session, device.id, check, {"job": key})
             await session.execute(delete(VeeamJob).where(VeeamJob.id == row.id))
 
-    if p.product == "uranium":
+    if p.product in APPS:
         # Niente repository né licenza; i dati Veeam del dispositivo restano come sono.
-        await resolve_problem(session, device.id, "agent.collector", {"collector": "uranium"})
-        device.uranium = {
-            "version": p.version, "service": p.service, "errors": p.errors, "reported_at": ts.isoformat(),
-        }
+        await resolve_problem(session, device.id, "agent.collector", {"collector": APPS[p.product]})
+        info = {"version": p.version, "errors": p.errors, "reported_at": ts.isoformat()}
+        if p.service is not None:
+            info["service"] = p.service
+        device.backup_apps = {**(device.backup_apps or {}), p.product: info}
         return
 
     # Repository: stesse soglie a cascata dei volumi.

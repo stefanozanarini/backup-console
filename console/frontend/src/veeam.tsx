@@ -167,11 +167,24 @@ function JobSummary({ job }: { job: VeeamJob }) {
         </dd>
         <dt>Ultimo successo</dt><dd>{dateTime(job.last_success)}</dd>
         {d.expected_interval_h ? <><dt>Frequenza abituale</dt><dd>{interval(d.expected_interval_h)}</dd></> : null}
-        {job.transferred_bytes != null && !rep && <><dt>Dati trasferiti</dt><dd>{bytes(job.transferred_bytes)}</dd></>}
+        {job.transferred_bytes != null && !rep && job.product !== "hyperbackup" && <><dt>Dati trasferiti</dt><dd>{bytes(job.transferred_bytes)}</dd></>}
         {d.description && <><dt>Descrizione</dt><dd>{d.description}</dd></>}
         {SUMMARY_LABELS.filter(([k]) => summary[k] != null && summary[k] !== "").map(([k, label]) => (
           <Fragment key={k}><dt>{label}</dt><dd>{String(summary[k])}</dd></Fragment>
         ))}
+        {d.source_bytes != null && <><dt>Dati sorgente</dt><dd>{bytes(d.source_bytes)}</dd></>}
+        {d.processed_bytes != null && <><dt>Dati elaborati</dt><dd>{bytes(d.processed_bytes)}</dd></>}
+        {job.product === "hyperbackup" && job.transferred_bytes != null && <><dt>Dati caricati</dt><dd>{bytes(job.transferred_bytes)}</dd></>}
+        {d.last_version && <><dt>Versione di backup</dt><dd>n. {d.last_version}</dd></>}
+        {d.integrity_check && (
+          <>
+            <dt>Verifica integrità</dt>
+            <dd>
+              <VeeamResultBadge result={d.integrity_check.result} /> {dateTime(d.integrity_check.end)}
+              {d.integrity_check.error && <span className="muted"> · {d.integrity_check.error}</span>}
+            </dd>
+          </>
+        )}
         {d.service_installed === false && (
           <><dt>Servizio</dt><dd>non installato: parte solo con un utente collegato e Uranium aperto</dd></>
         )}
@@ -237,7 +250,7 @@ export function HistoryTable({ job, writable = false }: { job: VeeamJob; writabl
   return (
     <div className="stack" style={{ gap: 8 }}>
       <JobSummary job={job} />
-      {writable && job.enabled && job.product !== "uranium" && (
+      {writable && job.enabled && (job.product === "vbr" || job.product === "vaw") && (
         <JobStartButton deviceId={job.device_id} jobKey={job.job_key} jobName={job.name} product={job.product}
           lastResult={job.last_result} running={job.details?.running} />
       )}
@@ -321,31 +334,36 @@ function JobsTable({ jobs, writable }: { jobs: VeeamJob[] | undefined; writable:
   );
 }
 
-/** Uranium Backup: backup set con esito e storico, come i job Veeam. */
-export function UraniumSection({ device }: { device: DeviceDetail }) {
-  const u = device.uranium;
-  const jobs = useApi<VeeamJob[]>(u ? `/veeam/jobs?device_id=${device.id}` : null, 60000);
-  if (!u) return null;
+const APP_TITLE: Record<string, string> = { uranium: "Uranium Backup", hyperbackup: "Hyper Backup" };
+
+/** Altri software di backup (Uranium, Hyper Backup): job con esito e storico, come Veeam. */
+export function BackupAppsSections({ device }: { device: DeviceDetail }) {
+  const apps = Object.entries(device.backup_apps ?? {}).filter(([, v]) => v);
+  const jobs = useApi<VeeamJob[]>(apps.length ? `/veeam/jobs?device_id=${device.id}` : null, 60000);
   return (
-    <section className="card">
-      <div className="page-head" style={{ marginBottom: 8 }}>
-        <h2 style={{ margin: 0 }}>
-          Uranium Backup
-          {u.version && <span className="chip mono" style={{ marginLeft: 8 }}>{u.version}</span>}
-        </h2>
-        <span className="muted" style={{ fontSize: 12.5 }}>report {ago(u.reported_at)}</span>
-      </div>
-      {u.service && !u.service.installed && (
-        <div className="notice" style={{ marginBottom: 12 }}>
-          Servizio di Uranium non installato: i backup pianificati partono solo mentre un utente è collegato con
-          Uranium Backup aperto (dopo un riavvio, senza accesso, non partono).
-        </div>
-      )}
-      {(u.errors ?? []).length > 0 && (
-        <div className="notice" style={{ marginBottom: 12 }}>Il collector ha segnalato: {u.errors!.join(" · ")}</div>
-      )}
-      <JobsTable jobs={jobs.data?.filter((j) => j.product === "uranium")} writable={false} />
-    </section>
+    <>
+      {apps.map(([product, u]) => (
+        <section className="card" key={product}>
+          <div className="page-head" style={{ marginBottom: 8 }}>
+            <h2 style={{ margin: 0 }}>
+              {APP_TITLE[product] ?? product}
+              {u!.version && <span className="chip mono" style={{ marginLeft: 8 }}>{u!.version}</span>}
+            </h2>
+            <span className="muted" style={{ fontSize: 12.5 }}>report {ago(u!.reported_at)}</span>
+          </div>
+          {u!.service && !u!.service.installed && (
+            <div className="notice" style={{ marginBottom: 12 }}>
+              Servizio di Uranium non installato: i backup pianificati partono solo mentre un utente è collegato con
+              Uranium Backup aperto (dopo un riavvio, senza accesso, non partono).
+            </div>
+          )}
+          {(u!.errors ?? []).length > 0 && (
+            <div className="notice" style={{ marginBottom: 12 }}>Il collector ha segnalato: {u!.errors!.join(" · ")}</div>
+          )}
+          <JobsTable jobs={jobs.data?.filter((j) => j.product === product)} writable={false} />
+        </section>
+      ))}
+    </>
   );
 }
 
@@ -369,7 +387,7 @@ export function VeeamSection({ device, writable = false }: { device: DeviceDetai
           Il collector ha segnalato: {v.errors!.join(" · ")}
         </div>
       )}
-      <JobsTable jobs={jobs.data?.filter((j) => j.product !== "uranium")} writable={writable} />
+      <JobsTable jobs={jobs.data?.filter((j) => j.product === "vbr" || j.product === "vaw")} writable={writable} />
 
       {(repos.length > 0 || v.license) && (
         <div className="grid-2" style={{ marginTop: 16, marginBottom: 0 }}>

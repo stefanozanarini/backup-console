@@ -476,8 +476,8 @@ async def veeam_job_start(
     job = await session.scalar(select(VeeamJob).where(VeeamJob.device_id == device.id, VeeamJob.job_key == body.job_key))
     if job is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "job non trovato")
-    if job.product == "uranium":
-        raise HTTPException(status.HTTP_409_CONFLICT, "i backup di Uranium si avviano da Uranium Backup")
+    if job.product in ("uranium", "hyperbackup"):
+        raise HTTPException(status.HTTP_409_CONFLICT, "questo job si avvia dal suo software di backup")
     if not job.enabled:
         raise HTTPException(status.HTTP_409_CONFLICT, "il job è disabilitato in Veeam")
     if (job.details or {}).get("running"):

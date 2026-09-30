@@ -133,8 +133,9 @@ class VeeamLicenseIn(BaseModel):
 
 
 class VeeamPayload(BaseModel):
-    # vbr / vaw su /agent/v1/veeam; uranium (Uranium Backup) su /agent/v1/uranium.
-    product: Literal["vbr", "vaw", "uranium"]
+    # vbr / vaw su /agent/v1/veeam; uranium (Uranium Backup) e hyperbackup (Synology
+    # Hyper Backup) sui loro endpoint.
+    product: Literal["vbr", "vaw", "uranium", "hyperbackup"]
     version: str | None = Field(default=None, max_length=64)
     jobs: list[VeeamJobIn] = Field(default=[], max_length=2000)
     repositories: list[VeeamRepositoryIn] = Field(default=[], max_length=500)

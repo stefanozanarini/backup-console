@@ -115,7 +115,8 @@ export interface VeeamStatus {
   reported_at?: string;
 }
 
-export interface UraniumStatus {
+/** Altri software di backup (Uranium, Hyper Backup): dati del dispositivo dall'ultimo report. */
+export interface BackupAppStatus {
   version?: string | null;
   service?: { installed: boolean; status: string | null } | null;
   errors?: string[];
@@ -126,7 +127,7 @@ export interface DeviceDetail extends Device {
   inventory: Inventory | null;
   inventory_at: string | null;
   veeam: VeeamStatus;
-  uranium?: UraniumStatus | null;
+  backup_apps?: { uranium?: BackupAppStatus; hyperbackup?: BackupAppStatus };
 }
 
 export type VeeamResult = "Success" | "Warning" | "Failed" | "None" | string;
@@ -147,7 +148,7 @@ export interface VeeamJob {
   id: string;
   tenant_id: string;
   device_id: string;
-  product: "vbr" | "vaw" | "uranium";
+  product: "vbr" | "vaw" | "uranium" | "hyperbackup";
   job_key: string;
   name: string;
   job_type: string | null;
@@ -166,6 +167,11 @@ export interface VeeamJob {
     messages?: { object?: string | null; status?: string | null; text: string }[];
     expected_interval_h?: number;
     description?: string;
+    // Solo Hyper Backup
+    source_bytes?: number;
+    processed_bytes?: number;
+    last_version?: string;
+    integrity_check?: { end: string | null; result: string; error: string };
     // Solo Uranium Backup
     set_file?: string;
     service_installed?: boolean;

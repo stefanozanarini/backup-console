@@ -320,6 +320,9 @@ func (a *Agent) sendReports(ctx context.Context) {
 				Data: map[string]any{"collector": c.Name(), "error": msg}})
 			continue
 		}
+		if path == "" {
+			continue // niente da riportare (es. Hyper Backup non installato)
+		}
 		if err := a.client.Send(ctx, path, a.client.NewEnvelope(payload)); err != nil {
 			log.Printf("invio report %s: %v", c.Name(), err)
 		}

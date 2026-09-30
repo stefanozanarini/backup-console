@@ -44,8 +44,9 @@ class Device(UUIDPk, Base):
     backup_window: Mapped[dict[str, Any] | None] = mapped_column(nullable=True)
     # Ultimo report Veeam: prodotto, versione, repository, licenza (i job sono in veeam_jobs).
     veeam: Mapped[dict[str, Any]] = mapped_column(default=dict)
-    # Ultimo report di Uranium Backup: versione, servizio, errori (i job sono in veeam_jobs).
-    uranium: Mapped[dict[str, Any] | None] = mapped_column(nullable=True)
+    # Altri software di backup (i job sono in veeam_jobs): {"uranium": {...}, "hyperbackup": {...}}
+    # con versione, errori, data del report e dati propri (es. servizio di Uranium).
+    backup_apps: Mapped[dict[str, Any]] = mapped_column(default=dict)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     last_seen_at: Mapped[datetime | None]
 

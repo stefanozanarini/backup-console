@@ -35,7 +35,7 @@ async def test_uranium_jobs_problems_and_history(client):
     r = await client.post("/agent/v1/uranium", headers=auth, json=uranium_report([weekly()]))
     assert r.status_code == 200, r.text
     d = (await client.get(f"/api/v1/devices/{dev}", headers=as_user())).json()
-    assert d["veeam"]["product"] == "vbr" and d["uranium"]["service"]["installed"] is False
+    assert d["veeam"]["product"] == "vbr" and d["backup_apps"]["uranium"]["service"]["installed"] is False
 
     jobs = {j["job_key"]: j for j in (await client.get(f"/api/v1/veeam/jobs?device_id={dev}", headers=as_user())).json()}
     assert set(jobs) == {"v1", "uranium:BkpSet00.bks"} and jobs["uranium:BkpSet00.bks"]["product"] == "uranium"
@@ -67,3 +67,22 @@ async def test_new_roles_are_accepted(client):
     assert (await client.post("/agent/v1/heartbeat", json=hb, headers=auth)).status_code == 200
     bad = {"version": "0.2.18", "roles": ["Nome Non Valido"]}
     assert (await client.post("/agent/v1/heartbeat", json=bad, headers=auth)).status_code == 422
+
+
+async def test_hyperbackup(client):
+    data, auth = await approved_agent(client, roles=("synology",))
+    end = NOW - timedelta(hours=20)
+    task = {"id": "hyperbackup:task_1", "name": "BackupNASAzureBlob", "type": "HyperBackup", "enabled": True,
+            "last_result": "Success", "last_end": end.isoformat(), "last_success": end.isoformat(),
+            "transferred_bytes": 7593855507,
+            "details": {"integrity_check": {"result": "Success"}, "expected_interval_h": 24.0,
+                        "history": [{"id": "task_1:1", "end": end.isoformat(), "result": "Success"}]}}
+    report = envelope({"product": "hyperbackup", "version": "4.1.2-4039", "jobs": [task], "errors": []})
+    assert (await client.post("/agent/v1/hyperbackup", headers=auth, json=report)).status_code == 200
+    d = (await client.get(f"/api/v1/devices/{data['device_id']}", headers=as_user())).json()
+    assert d["kind"] == "nas" and d["backup_apps"]["hyperbackup"]["version"] == "4.1.2-4039" and d["veeam"] == {}
+    [j] = (await client.get(f"/api/v1/veeam/jobs?device_id={data['device_id']}", headers=as_user())).json()
+    assert j["product"] == "hyperbackup" and j["name"] == "BackupNASAzureBlob"
+    assert (await client.get("/api/v1/problems", headers=as_user())).json() == []
+    bad = envelope({"product": "hyperbackup", "jobs": [], "errors": []})
+    assert (await client.post("/agent/v1/veeam", headers=auth, json=bad)).status_code == 422
