@@ -197,6 +197,15 @@ func (c *Collector) disks(ctx context.Context) []disk {
 				break
 			}
 		}
+		// Ultima risorsa per la temperatura: quella che DSM stesso tiene per ogni disco.
+		if d.tempC == nil {
+			if b, err := c.readFile("/run/synostorage/disks/" + filepath.Base(dev) + "/temperature"); err == nil {
+				if v, err := strconv.ParseFloat(strings.TrimSpace(string(b)), 64); err == nil && v > 0 && v < 100 {
+					d.tempC = &v
+					found = true
+				}
+			}
+		}
 		if !found {
 			continue
 		}
@@ -217,6 +226,8 @@ var (
 	// Attributo 194 (o 190): il primo numero del valore grezzo.
 	reAttrTemp = regexp.MustCompile(`(?m)^\s*(194|190)\s+\S+\s+(?:\S+\s+){7}(\d+)`)
 	reNvmeTemp = regexp.MustCompile(`(?m)^Temperature:\s*(\d+)\s*Celsius`)
+	// Modalità SCSI (smartctl senza -d su DSM): spesso 0, che si scarta.
+	reScsiTemp = regexp.MustCompile(`(?m)^Current Drive Temperature:\s*(\d+)\s*C`)
 )
 
 func parseSmartctl(s string) disk {
@@ -237,6 +248,8 @@ func parseSmartctl(s string) disk {
 	if m := reAttrTemp.FindStringSubmatch(s); m != nil {
 		t = m[2]
 	} else if m := reNvmeTemp.FindStringSubmatch(s); m != nil {
+		t = m[1]
+	} else if m := reScsiTemp.FindStringSubmatch(s); m != nil {
 		t = m[1]
 	}
 	if v, err := strconv.ParseFloat(t, 64); err == nil && v > 0 && v < 100 {

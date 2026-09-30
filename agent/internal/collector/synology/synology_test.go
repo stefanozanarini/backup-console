@@ -122,3 +122,73 @@ func TestSmartRetriesWithDeviceType(t *testing.T) {
 		t.Fatalf("%+v", d)
 	}
 }
+
+// Uscite reali di smartctl su un RS1221+ (DSM 7.2.2): senza -d modalità SCSI con
+// temperatura 0 e modello troncato, con -d sat attributi completi.
+const smartScsiDSM = `smartctl 6.5 (build date Sep 26 2022) [x86_64-linux-4.4.302+] (local build)
+=== START OF INFORMATION SECTION ===
+Vendor:               WDC
+Product:              WD122KRYZ-01CDAB
+=== START OF READ SMART DATA SECTION ===
+SMART Health Status: OK
+Current Drive Temperature:     0 C
+Drive Trip Temperature:        0 C
+`
+
+const smartSatDSM = `smartctl 6.5 (build date Sep 26 2022) [x86_64-linux-4.4.302+] (local build)
+=== START OF INFORMATION SECTION ===
+Device Model:     WDC WD122KRYZ-01CDAB0
+Serial Number:    8CKABCDE
+Warning! SMART Attribute Thresholds Structure error: invalid SMART checksum.
+=== START OF READ SMART DATA SECTION ===
+SMART overall-health self-assessment test result: PASSED
+ID# ATTRIBUTE_NAME                                                   FLAG     VALUE WORST THRESH TYPE      UPDATED  WHEN_FAILED RAW_VALUE
+  9 Power_On_Hours                                                   0x0032   084   084   000    Old_age   Always       -       12078
+194 Temperature_Celsius                                              0x0022   112   106   000    Old_age   Always       -       40
+`
+
+func TestSmartOnDSM(t *testing.T) {
+	c := &Collector{
+		readFile: func(string) ([]byte, error) { return nil, errors.New("no") },
+		glob: func(p string) ([]string, error) {
+			if p == "/dev/sata*" {
+				return []string{"/dev/sata1"}, nil
+			}
+			return nil, nil
+		},
+		run: func(_ context.Context, _ string, args ...string) (string, error) {
+			for _, a := range args {
+				if a == "sat" {
+					return smartSatDSM, nil
+				}
+			}
+			return smartScsiDSM, nil
+		},
+	}
+	d := c.disks(context.Background())
+	if len(d) != 1 || d[0].smartRaw != "GOOD" || d[0].tempC == nil || *d[0].tempC != 40 || d[0].model != "WDC WD122KRYZ-01CDAB0" {
+		t.Fatalf("%+v temp=%v", d, d[0].tempC)
+	}
+}
+
+func TestTemperatureFromSynostorage(t *testing.T) {
+	c := &Collector{
+		readFile: func(p string) ([]byte, error) {
+			if p == "/run/synostorage/disks/sata1/temperature" {
+				return []byte("38\n"), nil
+			}
+			return nil, errors.New("no")
+		},
+		glob: func(p string) ([]string, error) {
+			if p == "/dev/sata*" {
+				return []string{"/dev/sata1"}, nil
+			}
+			return nil, nil
+		},
+		run: func(context.Context, string, ...string) (string, error) { return smartScsiDSM, nil },
+	}
+	d := c.disks(context.Background())
+	if len(d) != 1 || *d[0].tempC != 38 || d[0].smartRaw != "GOOD" {
+		t.Fatalf("%+v", d)
+	}
+}
