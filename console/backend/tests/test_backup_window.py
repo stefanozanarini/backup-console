@@ -41,18 +41,19 @@ async def test_tenant_window_device_override_and_heartbeat(client):
     assert r.status_code == 200 and r.json()["source"] == "tenant"
     # Il PC eredita dal tenant e riceve gli intervalli con l'heartbeat; il server no.
     resp = (await client.post("/agent/v1/heartbeat", json=hb, headers=pc_auth)).json()
-    assert resp["backup_window"] == {"intervals": THU_MON["intervals"]}
+    assert resp["backup_window"] == {"intervals": THU_MON["intervals"], "remind_before_minutes": 30}
     resp = (await client.post("/agent/v1/heartbeat", json={"version": "0.2.13", "roles": ["veeam_vbr"]}, headers=srv_auth)).json()
     assert resp["backup_window"] is None
     st = (await client.get(f"/api/v1/devices/{pc['device_id']}/backup-window", headers=as_user())).json()
     assert st["source"] == "tenant" and st["applies"] and st["device"] is None
 
     # Il dispositivo ha la priorità: finestra propria, poi disattivata, poi di nuovo ereditata.
-    own = {"enabled": True, "intervals": [{"start": {"day": 5, "time": "20:00"}, "end": {"day": 6, "time": "08:00"}}]}
+    own = {"enabled": True, "remind_before_minutes": 0,
+           "intervals": [{"start": {"day": 5, "time": "20:00"}, "end": {"day": 6, "time": "08:00"}}]}
     r = await client.put(f"/api/v1/devices/{pc['device_id']}/backup-window", json=own, headers=as_user())
     assert r.json()["source"] == "device" and r.json()["effective"]["intervals"] == own["intervals"]
     resp = (await client.post("/agent/v1/heartbeat", json=hb, headers=pc_auth)).json()
-    assert resp["backup_window"] == {"intervals": own["intervals"]}
+    assert resp["backup_window"] == {"intervals": own["intervals"], "remind_before_minutes": 0}
     await client.put(f"/api/v1/devices/{pc['device_id']}/backup-window", json={"enabled": False}, headers=as_user())
     assert (await client.post("/agent/v1/heartbeat", json=hb, headers=pc_auth)).json()["backup_window"] is None
     r = await client.put(f"/api/v1/devices/{pc['device_id']}/backup-window", json=None, headers=as_user())

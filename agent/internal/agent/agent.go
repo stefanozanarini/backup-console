@@ -251,6 +251,8 @@ func (a *Agent) writeStatus(state string, err error) {
 	}
 	if active, until := a.window.state(); active {
 		st.BackupWindowUntil = &until
+	} else if start, end, ok := a.window.upcoming(time.Now()); ok {
+		st.BackupWindowStart, st.BackupWindowUntil = &start, &end
 	}
 	if err != nil {
 		st.LastError = err.Error()

@@ -331,6 +331,8 @@ class WindowInterval(BaseModel):
 class BackupWindowIn(BaseModel):
     enabled: bool = True
     intervals: list[WindowInterval] = Field(default=[], max_length=10)
+    # Promemoria all'utente (icona nella tray) prima dell'inizio; 0 = nessuno.
+    remind_before_minutes: int = Field(30, ge=0, le=240)
 
     @model_validator(mode="after")
     def _intervals(self):

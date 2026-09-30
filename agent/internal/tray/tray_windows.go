@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 	"unsafe"
 
@@ -119,7 +120,7 @@ func (m *menu) refresh(mutex windows.Handle) {
 		}
 	}
 
-	m.showWindow(st.BackupWindowUntil)
+	m.showWindow(st.BackupWindowStart, st.BackupWindowUntil)
 
 	switch st.State {
 	case "approved":
@@ -153,20 +154,45 @@ func (m *menu) show(ok bool, state, contact, exec string) {
 	}
 }
 
-// showWindow: durante la finestra di backup una riga nel menu, il suggerimento sull'icona
-// e, una volta per finestra, un avviso. È solo informativo: l'utente può spegnere.
-func (m *menu) showWindow(until *time.Time) {
+// showWindow mostra la finestra di backup: prima dell'inizio un promemoria, durante la
+// finestra fino a quando dura. Oltre alla riga nel menu, un avviso una volta per
+// finestra e per sessione: l'icona parte a ogni accesso, quindi chi entra durante la
+// finestra lo rivede. È solo informativo: l'utente può spegnere.
+func (m *menu) showWindow(start, until *time.Time) {
 	if until == nil {
 		m.window.Hide()
 		return
 	}
-	text := "Backup programmato fino a " + windowEnd(*until) + ": se possibile lascia acceso il PC"
+	var text, detail string
+	if start != nil {
+		text = fmt.Sprintf("%s parte il backup programmato (fino a %s): quando esci lascia acceso il PC",
+			startWhen(*start), windowEnd(*until))
+		detail = "Grazie: il backup si fa di notte o nel fine settimana e ha bisogno che il PC resti acceso."
+	} else {
+		text = "Backup programmato fino a " + windowEnd(*until) + ": se possibile lascia acceso il PC"
+		detail = "Il PC non andrà in sospensione da solo durante questo periodo."
+	}
 	m.window.SetTitle(text)
 	m.window.Show()
-	if !m.notified.Equal(*until) {
-		m.notified = *until
-		go notify("Backup Console Agent", text+".\n\nIl PC non andrà in sospensione da solo durante questo periodo.")
+	key := *until
+	if start != nil {
+		key = start.Add(-time.Second) // promemoria e inizio sono due avvisi distinti
 	}
+	if !m.notified.Equal(key) {
+		m.notified = key
+		go notify("Backup Console Agent", text+".\n\n"+detail)
+	}
+}
+
+// startWhen: "Oggi alle 18:00" o "Giovedì alle 18:00".
+func startWhen(t time.Time) string {
+	t = t.Local()
+	now := time.Now()
+	if t.YearDay() == now.YearDay() && t.Year() == now.Year() {
+		return "Oggi alle " + t.Format("15:04")
+	}
+	d := giorni[t.Weekday()]
+	return strings.ToUpper(d[:1]) + d[1:] + " alle " + t.Format("15:04")
 }
 
 var giorni = [...]string{"domenica", "lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato"}

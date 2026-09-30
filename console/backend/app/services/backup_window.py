@@ -38,7 +38,9 @@ def for_agent(device: Device, tenant: Tenant | None) -> dict[str, Any] | None:
     if not applies(device):
         return None
     w, _ = effective(device, tenant)
-    return {"intervals": w["intervals"]} if w else None
+    if not w:
+        return None
+    return {"intervals": w["intervals"], "remind_before_minutes": int(w.get("remind_before_minutes", 30))}
 
 
 def _minute(p: dict[str, Any]) -> int:

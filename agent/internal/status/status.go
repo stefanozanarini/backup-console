@@ -20,7 +20,9 @@ type Status struct {
 	LastContact time.Time `json:"last_contact,omitempty"`
 	LastError   string    `json:"last_error,omitempty"`
 	UpdatedAt   time.Time `json:"updated_at"`
-	// Fine della finestra di backup in corso (nil se non attiva): l'icona lo mostra.
+	// Finestra di backup: in corso (solo Until) o in arrivo (Start e Until, nel periodo di
+	// promemoria). Nil se nessuna delle due: l'icona lo mostra all'utente.
+	BackupWindowStart *time.Time `json:"backup_window_start,omitempty"`
 	BackupWindowUntil *time.Time `json:"backup_window_until,omitempty"`
 }
 

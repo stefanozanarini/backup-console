@@ -27,6 +27,9 @@ type Interval struct {
 // Window è la finestra effettiva inviata dalla console (nil = nessuna finestra).
 type Window struct {
 	Intervals []Interval `json:"intervals"`
+	// Minuti prima dell'inizio in cui l'icona ricorda all'utente di lasciare acceso il PC
+	// (0 = nessun promemoria).
+	RemindBeforeMin int `json:"remind_before_minutes,omitempty"`
 }
 
 const week = 7 * 24 * 60
@@ -77,6 +80,35 @@ func (w *Window) Active(t time.Time) (bool, time.Time) {
 		active = true
 	}
 	return active, until
+}
+
+// Upcoming: se t cade nel periodo di promemoria prima di un intervallo, ne ritorna
+// inizio e fine (il più vicino). Durante un intervallo già in corso vale Active.
+func (w *Window) Upcoming(t time.Time) (start, end time.Time, ok bool) {
+	if w == nil || w.RemindBeforeMin <= 0 {
+		return
+	}
+	if active, _ := w.Active(t); active {
+		return
+	}
+	now := nowMinute(t)
+	best := -1
+	for _, iv := range w.Intervals {
+		s, err1 := iv.Start.minuteOfWeek()
+		e, err2 := iv.End.minuteOfWeek()
+		if err1 != nil || err2 != nil || s == e {
+			continue
+		}
+		wait := (s - now + week) % week
+		if wait == 0 || wait > w.RemindBeforeMin || (best >= 0 && wait >= best) {
+			continue
+		}
+		best = wait
+		start = t.Truncate(time.Minute).Add(time.Duration(wait) * time.Minute)
+		end = start.Add(time.Duration((e-s+week)%week) * time.Minute)
+		ok = true
+	}
+	return
 }
 
 // Load e Save conservano l'ultima finestra ricevuta: vale anche se la console non è

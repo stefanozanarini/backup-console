@@ -69,3 +69,21 @@ func TestSaveLoad(t *testing.T) {
 		t.Fatal("la finestra rimossa deve sparire")
 	}
 }
+
+func TestUpcomingReminder(t *testing.T) {
+	w := &Window{Intervals: thuMon.Intervals, RemindBeforeMin: 30}
+	if _, _, ok := w.Upcoming(at("2026-10-01 17:29")); ok {
+		t.Fatal("troppo presto per il promemoria")
+	}
+	start, end, ok := w.Upcoming(at("2026-10-01 17:30"))
+	if !ok || !start.Equal(at("2026-10-01 18:00")) || !end.Equal(at("2026-10-05 09:00")) {
+		t.Fatalf("promemoria: ok=%v inizio=%v fine=%v", ok, start, end)
+	}
+	if _, _, ok := w.Upcoming(at("2026-10-01 18:00")); ok {
+		t.Fatal("a finestra iniziata non è più un promemoria")
+	}
+	w.RemindBeforeMin = 0
+	if _, _, ok := w.Upcoming(at("2026-10-01 17:45")); ok {
+		t.Fatal("promemoria disattivato")
+	}
+}

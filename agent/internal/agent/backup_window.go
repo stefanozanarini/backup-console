@@ -69,6 +69,13 @@ func (b *backupWindow) state() (bool, time.Time) {
 	return b.active, b.until
 }
 
+// upcoming: finestra che sta per iniziare (periodo di promemoria).
+func (b *backupWindow) upcoming(now time.Time) (time.Time, time.Time, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.w.Upcoming(now)
+}
+
 func (b *backupWindow) loop(ctx context.Context) {
 	b.tick(time.Now())
 	t := time.NewTicker(30 * time.Second)

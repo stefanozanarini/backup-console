@@ -7,7 +7,7 @@ import { dateTime } from "./format";
 
 interface Point { day: number; time: string }
 interface Interval { start: Point; end: Point }
-interface WindowCfg { enabled: boolean; intervals: Interval[] }
+interface WindowCfg { enabled: boolean; intervals: Interval[]; remind_before_minutes?: number }
 interface WindowState {
   tenant: WindowCfg | null;
   device: WindowCfg | null;
@@ -23,9 +23,23 @@ const DEFAULT: Interval = { start: { day: 4, time: "18:00" }, end: { day: 1, tim
 
 export function describe(w: WindowCfg | null): string {
   if (!w || !w.enabled || w.intervals.length === 0) return "nessuna";
+  const r = w.remind_before_minutes ?? 30;
   return w.intervals
     .map((i) => `dal ${DAYS[i.start.day - 1]} alle ${i.start.time} al ${DAYS[i.end.day - 1]} alle ${i.end.time}`)
-    .join("; ");
+    .join("; ") + (r > 0 ? ` · promemoria ${r} min prima` : " · senza promemoria");
+}
+
+const REMIND_OPTIONS = [0, 15, 30, 60, 120];
+
+function RemindSelect({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  return (
+    <div className="form-row">
+      <span className="muted">Promemoria agli utenti</span>
+      <select value={value} onChange={(e) => onChange(Number(e.target.value))} aria-label="Promemoria">
+        {REMIND_OPTIONS.map((m) => <option key={m} value={m}>{m === 0 ? "nessuno" : `${m} minuti prima dell'inizio`}</option>)}
+      </select>
+    </div>
+  );
 }
 
 function PointInput({ value, onChange, label }: { value: Point; onChange: (p: Point) => void; label: string }) {
@@ -71,14 +85,15 @@ function ActiveLine({ st }: { st: WindowState }) {
     : <div className="muted small">Non attiva in questo momento.</div>;
 }
 
-const NOTE = "Durante la finestra l'agente disattiva la sospensione automatica e avvisa l'utente dall'icona " +
-  "nella tray; l'utente può comunque spegnere. Se il PC risulta spento la console apre un problema. " +
-  "Vale solo per i PC Windows con Veeam Agent.";
+const NOTE = "Prima dell'inizio l'icona nella tray ricorda all'utente di lasciare acceso il PC; durante la " +
+  "finestra l'agente disattiva la sospensione automatica e l'avviso ricompare a ogni accesso. L'utente può " +
+  "comunque spegnere: se il PC risulta spento la console apre un problema. Vale solo per i PC Windows con Veeam Agent.";
 
 /** Impostazione del tenant (predefinita per tutti i suoi PC). */
 export function TenantBackupWindow({ tenantId, writable }: { tenantId: string; writable: boolean }) {
   const state = useApi<WindowState>(`/tenants/${tenantId}/backup-window`);
   const [editing, setEditing] = useState<Interval[] | null>(null);
+  const [remind, setRemind] = useState(30);
   const [error, setError] = useState<Error | null>(null);
 
   async function save(body: WindowCfg | null) {
@@ -101,7 +116,10 @@ export function TenantBackupWindow({ tenantId, writable }: { tenantId: string; w
         </span>
         {writable && st && !editing && (
           <span className="btn-row">
-            <button className="btn small" onClick={() => setEditing(st.tenant?.intervals.length ? st.tenant.intervals : [DEFAULT])}>
+            <button className="btn small" onClick={() => {
+              setEditing(st.tenant?.intervals.length ? st.tenant.intervals : [DEFAULT]);
+              setRemind(st.tenant?.remind_before_minutes ?? 30);
+            }}>
               {st.tenant ? "Modifica" : "Imposta"}
             </button>
             {st.tenant && <button className="btn small" onClick={() => void save(null)}>Rimuovi</button>}
@@ -112,8 +130,9 @@ export function TenantBackupWindow({ tenantId, writable }: { tenantId: string; w
       {st && <ActiveLine st={st} />}
       {editing && (
         <form className="stack" style={{ marginTop: 8 }}
-          onSubmit={(e) => { e.preventDefault(); void save({ enabled: true, intervals: editing }); }}>
+          onSubmit={(e) => { e.preventDefault(); void save({ enabled: true, intervals: editing, remind_before_minutes: remind }); }}>
           <IntervalsEditor value={editing} onChange={setEditing} />
+          <RemindSelect value={remind} onChange={setRemind} />
           <div className="muted small">{NOTE} I PC con un'impostazione propria non cambiano.</div>
           <div className="btn-row">
             <button className="btn primary" type="submit">Salva</button>
@@ -132,6 +151,7 @@ export function DeviceBackupWindow({ deviceId, writable }: { deviceId: string; w
   const state = useApi<WindowState>(`/devices/${deviceId}/backup-window`);
   const [mode, setMode] = useState<Mode>("inherit");
   const [intervals, setIntervals] = useState<Interval[]>([DEFAULT]);
+  const [remind, setRemind] = useState(30);
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const st = state.data;
@@ -143,6 +163,7 @@ export function DeviceBackupWindow({ deviceId, writable }: { deviceId: string; w
     else {
       setMode("custom");
       setIntervals(st.device.intervals);
+      setRemind(st.device.remind_before_minutes ?? 30);
     }
   }, [st, dirty]);
 
@@ -150,7 +171,8 @@ export function DeviceBackupWindow({ deviceId, writable }: { deviceId: string; w
 
   async function save() {
     setError(null);
-    const body = mode === "inherit" ? null : mode === "off" ? { enabled: false, intervals: [] } : { enabled: true, intervals };
+    const body = mode === "inherit" ? null : mode === "off" ? { enabled: false, intervals: [] }
+      : { enabled: true, intervals, remind_before_minutes: remind };
     try {
       await api(`/devices/${deviceId}/backup-window`, { method: "PUT", body });
       setDirty(false);
@@ -183,6 +205,7 @@ export function DeviceBackupWindow({ deviceId, writable }: { deviceId: string; w
             {mode === "custom" && (
               <div style={{ paddingLeft: 24 }}>
                 <IntervalsEditor value={intervals} onChange={(v) => { setIntervals(v); setDirty(true); }} />
+                <RemindSelect value={remind} onChange={(v) => { setRemind(v); setDirty(true); }} />
               </div>
             )}
             <div className="form-row">
