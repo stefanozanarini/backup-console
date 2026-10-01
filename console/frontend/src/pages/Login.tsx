@@ -5,10 +5,10 @@ export default function Login({ session, denied }: { session: Session; denied: s
   return (
     <div className="login">
       <div className="card">
-        <div className="brand">
-          <img src="/favicon.svg" alt="" width={22} height={22} />
-          Backup Console
+        <div className="login-brand">
+          <img src="/logo.svg" alt="AGS Backup Console" />
         </div>
+        <div className="login-title">Accedi alla console</div>
         {denied ? (
           <>
             <div className="alert" role="alert">

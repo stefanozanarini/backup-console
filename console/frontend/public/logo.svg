@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 440 140">
+<rect width="440" height="140" rx="14" fill="#111111"/>
+<g transform="translate(20,12) scale(1.16)"><path d="M50,5 L90,20 V50 C90,75 72,90 50,98 C28,90 10,75 10,50 V20 Z" fill="#E30613"/></g>
+<g transform="translate(78,70) scale(0.85)"><g><path d="M-28.2,-10.3 A30,30 0 0 1 28.2,-10.3" fill="none" stroke="#FFFFFF" stroke-width="6"/><polygon points="31.6,-0.9 34.8,-12.7 21.6,-7.9" fill="#FFFFFF"/></g><g transform="rotate(180)"><path d="M-28.2,-10.3 A30,30 0 0 1 28.2,-10.3" fill="none" stroke="#FFFFFF" stroke-width="6"/><polygon points="31.6,-0.9 34.8,-12.7 21.6,-7.9" fill="#FFFFFF"/></g><path d="M-11,0 L-3,8 L12,-9" fill="none" stroke="#FFFFFF" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="150" y="82" font-family="'Arial Black','Helvetica Neue',Arial,sans-serif" font-weight="900" font-style="italic" font-size="58" fill="#FFFFFF" letter-spacing="-1">AGS</text><rect x="145" y="50.7" width="139" height="1.7" fill="#111111"/><rect x="145" y="61.1" width="139" height="1.7" fill="#111111"/><rect x="145" y="71.6" width="139" height="1.7" fill="#111111"/>
+<text x="153" y="112" font-family="'Arial Black','Helvetica Neue',Arial,sans-serif" font-weight="900" font-size="17" fill="#E30613" textLength="166" lengthAdjust="spacing">BACKUP CONSOLE</text>
+</svg>
