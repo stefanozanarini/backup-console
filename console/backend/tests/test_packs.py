@@ -92,3 +92,51 @@ async def test_probe_output_is_parsed_by_console(client):
     async with SessionLocal() as s:
         st = (await s.get(Device, dev)).probe_status
     assert st["futuro"]["note"] == "nessun parser in questa versione della console" and st["veeam_vbr"]["ok"]
+
+
+QNAP_OUT = """now={now}
+force_enable_code_signing={force}
+enable=TRUE
+qpkg_version=0.2.17
+--log
+{log}
+--conf
+force_enable_code_signing = {force}
+"""
+
+
+async def test_qnap_code_signing(client):
+    from app.models import Device  # noqa: F401
+    data, auth = await approved_agent(client, roles=("qnap",))
+    nas = datetime.now(UTC) + timedelta(hours=2)  # NAS in ora locale (UTC+2)
+
+    def line(delta_s, text):
+        t = nas - timedelta(seconds=delta_s)
+        return t.strftime("%m/%d %H:%M:%S") + "(123) " + text
+
+    def out(force, *lines):
+        return QNAP_OUT.format(now=nas.strftime("%Y-%m-%d %H:%M:%S"), force=force, log="\n".join(lines))
+
+    async def problems():
+        return [p for p in (await client.get("/api/v1/problems", headers=as_user())).json() if p["check"] == "qnap.code_signing"]
+
+    check = 'qpkgd_check_code_signing 2104: echo -n "BackupConsoleAgent" | qsh -0e cs_qdaemon.get_cms_info return fail'
+    disable = "add_mission 489: [CLI] disable (BackupConsoleAgent)"
+
+    # Nessun controllo nel log, firma imposta: avviso preventivo.
+    await client.post("/agent/v1/probe", headers=auth, json=probe("qnap_codesign", out("TRUE")))
+    [p] = await problems()
+    assert p["title"].endswith("verrà disattivato") and p["severity"] == "warning"
+
+    # QTS ha disattivato l'agente subito dopo un controllo fallito.
+    r = await client.post("/agent/v1/probe", headers=auth, json=probe("qnap_codesign", out("FALSE", line(3600, check), line(3599, disable))))
+    assert r.status_code == 200, r.text
+    [p] = await problems()
+    assert p["title"].startswith("QTS disattiva l'agente") and p["details"]["disabled_count"] == 1
+    last = datetime.fromisoformat(p["details"]["last_disabled"])
+    assert abs((last - (datetime.now(UTC) - timedelta(seconds=3599))).total_seconds()) < 120  # convertito in UTC
+
+    # Controllo successivo senza disattivazione (opzione abilitata in App Center): risolto.
+    await client.post("/agent/v1/probe", headers=auth,
+                      json=probe("qnap_codesign", out("FALSE", line(3600, check), line(3599, disable), line(60, check))))
+    assert await problems() == []

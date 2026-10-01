@@ -143,6 +143,9 @@ const DETAIL_LABELS: Record<string, string> = {
   retries: "Retry", repo: "Repository", mount: "Volume", disk: "Disco",
   error: "Errore", collector: "Raccolta", at: "Quando", reported_at: "Ultimo report ricevuto",
   agent_version: "Versione agente", last_seen_at: "Ultimo contatto", until: "Fine della finestra",
+  force_enable_code_signing: "Firma obbligatoria (uLinux.conf)", last_check: "Ultimo controllo firma",
+  last_disabled: "Ultima disattivazione", disabled_count: "Disattivazioni nel log", qpkg_version: "Versione in App Center",
+  settings: "Impostazioni trovate",
 };
 const HIDDEN = new Set(["messages", "sessions", "job_key"]);
 
@@ -207,6 +210,12 @@ function ProblemDetails({ problem, writable }: { problem: Problem; writable: boo
       {messages.length === 0 && sessions.length === 0 && problem.check === "veeam.job_result" && (
         <div className="muted">
           Nessun dettaglio disponibile: l'agente lo riporterà dalla prossima raccolta (serve la versione aggiornata).
+        </div>
+      )}
+      {problem.check === "qnap.code_signing" && (
+        <div className="muted">
+          Su QTS: App Center → ⚙ Impostazioni → Generale → spuntare «Consenti installazione di applicazioni senza
+          firma digitale valida» e Applica. Poi riabilitare Backup Console Agent se risulta disattivato.
         </div>
       )}
       <div className="muted small">

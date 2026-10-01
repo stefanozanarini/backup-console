@@ -5,8 +5,9 @@ Ogni probe ha un parser con lo stesso id. Un probe senza parser (pacchetto più 
 della console) viene solo registrato nello stato del dispositivo."""
 
 import json
+import re
 from collections.abc import Awaitable, Callable
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from pydantic import ValidationError
@@ -18,7 +19,7 @@ from app.services import veeam as veeam_service
 from app.services.problems import raise_problem, resolve_problem
 
 LABELS = {"veeam_vbr": "Veeam B&R", "veeam_vaw": "Veeam Agent", "uranium": "Uranium Backup",
-          "synology": "Hyper Backup", "hyperbackup": "Hyper Backup"}
+          "synology": "Hyper Backup", "hyperbackup": "Hyper Backup", "qnap_codesign": "firma app QTS"}
 
 
 class ProbeOutputError(ValueError):
@@ -76,10 +77,94 @@ def _backup_parser(product: str) -> Callable[[AsyncSession, Device, ProbeResultI
     return parse
 
 
+# --- QNAP: firma digitale obbligatoria per le app ------------------------------------
+
+# Righe di /var/log/log.qpkg (ora locale del NAS, senza anno): "10/01 07:50:01(24415) funzione riga: testo"
+_QPKG_LOG = re.compile(r"^(\d\d)/(\d\d) (\d\d):(\d\d):(\d\d)\(\d+\) (\w+) \d+: (.*)$")
+
+
+def _parse_kv(stdout: str) -> tuple[dict[str, str], dict[str, list[str]]]:
+    values: dict[str, str] = {}
+    sections: dict[str, list[str]] = {}
+    current: list[str] | None = None
+    for line in stdout.splitlines():
+        line = line.rstrip()
+        if line.startswith("--"):
+            current = sections.setdefault(line[2:], [])
+        elif current is not None:
+            if line:
+                current.append(line)
+        elif "=" in line:
+            k, v = line.split("=", 1)
+            values[k.strip()] = v.strip()
+    return values, sections
+
+
+def _log_time(m: re.Match, nas_now: datetime, offset: timedelta) -> datetime:
+    """Ora UTC di una riga del log: l'anno è quello del NAS, o il precedente se la data è nel futuro."""
+    month, day, hh, mm, ss = (int(m.group(i)) for i in range(1, 6))
+    local = nas_now.replace(month=month, day=day, hour=hh, minute=mm, second=ss)
+    if local > nas_now + timedelta(days=1):
+        local = local.replace(year=local.year - 1)
+    return local - offset
+
+
+async def _qnap_codesign(session: AsyncSession, device: Device, r: ProbeResultIn, ts: datetime) -> None:
+    values, sections = _parse_kv(r.stdout)
+    if "now" not in values:
+        raise ProbeOutputError("manca l'ora del NAS")
+    try:
+        nas_now = datetime.strptime(values["now"], "%Y-%m-%d %H:%M:%S")
+    except ValueError as e:
+        raise ProbeOutputError(f"ora del NAS non valida: {values['now']}") from e
+    # Fuso del NAS: differenza dall'avvio del probe (UTC), arrotondata al quarto d'ora.
+    started = r.started_at
+    utc_now = started.astimezone(UTC).replace(tzinfo=None) if started.tzinfo else started
+    offset = timedelta(minutes=round((nas_now - utc_now).total_seconds() / 900) * 15)
+
+    checks: list[datetime] = []
+    disables: list[datetime] = []
+    for line in sections.get("log", []):
+        m = _QPKG_LOG.match(line)
+        if not m:
+            continue
+        at = _log_time(m, nas_now, offset)
+        if m.group(6) == "qpkgd_check_code_signing" and "fail" in m.group(7):
+            checks.append(at)
+        elif m.group(6) == "add_mission" and "[CLI] disable (BackupConsoleAgent)" in m.group(7):
+            disables.append(at)
+    # Disattivazione dovuta alla firma: segue di pochi secondi un controllo fallito.
+    blocked = [d for d in disables if any(timedelta(0) <= d - c <= timedelta(seconds=30) for c in checks)]
+    forced = values.get("force_enable_code_signing", "").upper() == "TRUE"
+    last_check = max(checks) if checks else None
+    details = {
+        "force_enable_code_signing": values.get("force_enable_code_signing") or None,
+        "last_check": last_check.isoformat() + "Z" if last_check else None,
+        "last_disabled": max(blocked).isoformat() + "Z" if blocked else None,
+        "disabled_count": len(blocked) or None,
+        "qpkg_version": values.get("qpkg_version") or None,
+        "settings": "; ".join(sections.get("conf", [])[:5]) or None,
+    }
+    labels = {"app": "BackupConsoleAgent"}
+    if last_check is not None:
+        # Il verdetto di QTS conta più delle chiavi: l'ultimo controllo ha disattivato l'agente?
+        risk = bool(blocked) and max(blocked) >= last_check
+    else:
+        risk = forced
+    if risk:
+        title = ("QTS disattiva l'agente: firma digitale delle app obbligatoria" if blocked
+                 else "QTS impone la firma digitale delle app: l'agente verrà disattivato")
+        await raise_problem(session, device, "qnap.code_signing", Severity.WARNING, title, labels,
+                            {k: v for k, v in details.items() if v is not None})
+    else:
+        await resolve_problem(session, device.id, "qnap.code_signing", labels)
+
+
 PARSERS: dict[str, Callable[[AsyncSession, Device, ProbeResultIn, datetime], Awaitable[None]]] = {
     "veeam_vbr": _backup_parser("vbr"),
     "veeam_vaw": _backup_parser("vaw"),
     "uranium": _backup_parser("uranium"),
+    "qnap_codesign": _qnap_codesign,
 }
 
 
