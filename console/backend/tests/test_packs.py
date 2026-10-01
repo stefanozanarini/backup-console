@@ -140,3 +140,42 @@ async def test_qnap_code_signing(client):
     await client.post("/agent/v1/probe", headers=auth,
                       json=probe("qnap_codesign", out("FALSE", line(3600, check), line(3599, disable), line(60, check))))
     assert await problems() == []
+
+
+DISCOVERY_OUT = """now=2026-10-01 18:00:00
+--self
+qvs0 192.168.50.183 24
+--found
+qnap|192.168.50.20|TS-453D|NAS-PIANO2|5.2.1
+synology|192.168.50.30|||
+qnap|192.168.50.40|TS-231|nas-vecchio|4.3.6
+qnap|not-an-ip|x|y|z
+--arp
+IP address       HW type     Flags       HW address            Mask     Device
+192.168.50.20    0x1         0x2         24:5E:BE:00:00:01     *        qvs0
+192.168.50.30    0x1         0x2         00:11:32:00:00:02     *        qvs0
+"""
+
+
+async def test_nas_discovery(client):
+    from app.db import SessionLocal
+    from app.models import Device
+
+    data, auth = await approved_agent(client, roles=("qnap",))
+    dev = data["device_id"]
+    async with SessionLocal() as s:
+        me = await s.get(Device, dev)
+        common = {"tenant_id": me.tenant_id, "site_id": me.site_id, "kind": me.kind, "platform": "linux", "arch": "x86_64"}
+        s.add(Device(name="Piano 2", hostname="qnap-p2", ip_addresses=[{"name": "eth0", "mac": "24:5e:be:00:00:01", "ipv4": ["10.9.9.9"]}], **common))
+        s.add(Device(name="NAS vecchio", hostname="NAS-VECCHIO", **common))
+        await s.commit()
+
+    r = await client.post("/agent/v1/probe", headers=auth, json=probe("nas_discovery", DISCOVERY_OUT))
+    assert r.status_code == 200, r.text
+    nb = (await client.get(f"/api/v1/devices/{dev}", headers=as_user())).json()["nas_neighbors"]
+    assert nb["networks"] == [{"interface": "qvs0", "ip": "192.168.50.183", "prefix": 24}]
+    by_ip = {f["ip"]: f for f in nb["found"]}
+    assert list(by_ip) == ["192.168.50.20", "192.168.50.30", "192.168.50.40"]
+    assert by_ip["192.168.50.20"]["device_name"] == "Piano 2"  # per MAC
+    assert by_ip["192.168.50.40"]["device_name"] == "NAS vecchio"  # per nome host
+    assert by_ip["192.168.50.30"]["device_id"] is None and by_ip["192.168.50.30"]["mac"] == "00:11:32:00:00:02"

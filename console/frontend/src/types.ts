@@ -129,6 +129,16 @@ export interface DeviceDetail extends Device {
   veeam: VeeamStatus;
   backup_apps?: { uranium?: BackupAppStatus; hyperbackup?: BackupAppStatus };
   probe_status?: Record<string, { at: string; ok: boolean; duration_ms: number; pack: string; error?: string | null; note?: string | null }>;
+  nas_neighbors?: NasNeighbors | null;
+}
+
+export interface NasNeighbors {
+  at: string;
+  networks: { interface: string; ip: string; prefix: number | null }[];
+  found: {
+    ip: string; kind: "qnap" | "synology"; model: string | null; hostname: string | null; firmware: string | null;
+    mac: string | null; device_id: string | null; device_name: string | null;
+  }[];
 }
 
 export type VeeamResult = "Success" | "Warning" | "Failed" | "None" | string;

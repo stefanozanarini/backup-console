@@ -191,6 +191,7 @@ select:focus, input:focus { outline: 2px solid var(--accent); outline-offset: -1
 
 .alert { padding: 10px 12px; border-radius: 6px; margin-bottom: 12px; background: var(--critical-bg); border: 1px solid var(--critical); }
 .notice { padding: 10px 12px; border-radius: 6px; background: var(--surface-2); color: var(--text-2); font-size: 13px; }
+.notice.warn { background: var(--warning-bg); color: var(--text); border: 1px solid var(--warning); }
 
 /* --- barra utilizzo ------------------------------------------------------ */
 .usage { display: flex; align-items: center; gap: 8px; min-width: 160px; }

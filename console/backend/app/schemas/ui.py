@@ -128,6 +128,8 @@ class DeviceDetail(DeviceOut):
     veeam: dict[str, Any] = {}
     backup_apps: dict[str, Any] = {}
     probe_status: dict[str, Any] = {}
+    # NAS trovati nella stessa rete, ognuno con il dispositivo corrispondente in console (se c'è).
+    nas_neighbors: dict[str, Any] | None = None
     inventory: dict[str, Any] | None = None
     inventory_at: datetime | None = None
 

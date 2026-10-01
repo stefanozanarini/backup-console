@@ -49,6 +49,9 @@ class Device(UUIDPk, Base):
     backup_apps: Mapped[dict[str, Any]] = mapped_column(default=dict)
     # Ultima esecuzione di ogni probe del pacchetto di raccolta: {id: {at, ok, duration_ms, pack, error}}.
     probe_status: Mapped[dict[str, Any]] = mapped_column(default=dict)
+    # NAS trovati nelle sottoreti del dispositivo (probe nas_discovery):
+    # {"at", "networks": [...], "found": [{"ip", "kind", "model", "hostname", "firmware", "mac"}]}.
+    nas_neighbors: Mapped[dict[str, Any] | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     last_seen_at: Mapped[datetime | None]
 

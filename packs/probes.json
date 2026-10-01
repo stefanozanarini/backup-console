@@ -47,6 +47,15 @@
       "detect": {"file_contains": {"path": "/etc/config/qpkg.conf", "text": "[BackupConsoleAgent]"}},
       "interval_s": 3600,
       "timeout_s": 30
+    },
+    {
+      "id": "nas_discovery",
+      "platform": "linux",
+      "interpreter": "sh",
+      "scripts": ["nas_discovery.sh"],
+      "detect": {"file_contains": {"path": "/etc/config/qpkg.conf", "text": "[BackupConsoleAgent]"}},
+      "interval_s": 86400,
+      "timeout_s": 300
     }
   ]
 }

@@ -19,7 +19,8 @@ from app.services import veeam as veeam_service
 from app.services.problems import raise_problem, resolve_problem
 
 LABELS = {"veeam_vbr": "Veeam B&R", "veeam_vaw": "Veeam Agent", "uranium": "Uranium Backup",
-          "synology": "Hyper Backup", "hyperbackup": "Hyper Backup", "qnap_codesign": "firma app QTS"}
+          "synology": "Hyper Backup", "hyperbackup": "Hyper Backup", "qnap_codesign": "firma app QTS",
+          "nas_discovery": "NAS nella rete"}
 
 
 class ProbeOutputError(ValueError):
@@ -160,11 +161,45 @@ async def _qnap_codesign(session: AsyncSession, device: Device, r: ProbeResultIn
         await resolve_problem(session, device.id, "qnap.code_signing", labels)
 
 
+# --- NAS nella stessa rete ------------------------------------------------------------
+
+_IPV4 = re.compile(r"^\d{1,3}(\.\d{1,3}){3}$")
+_MAC = re.compile(r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$")
+
+
+async def _nas_discovery(session: AsyncSession, device: Device, r: ProbeResultIn, ts: datetime) -> None:
+    _, sections = _parse_kv(r.stdout)
+    if "found" not in sections:
+        raise ProbeOutputError("manca l'elenco dei NAS trovati")
+    networks = []
+    for line in sections.get("self", []):
+        parts = line.split()
+        if len(parts) == 3 and _IPV4.match(parts[1]):
+            networks.append({"interface": parts[0][:32], "ip": parts[1], "prefix": int(parts[2]) if parts[2].isdigit() else None})
+    arp = {}
+    for line in sections.get("arp", []):
+        parts = line.split()
+        if len(parts) >= 4 and _IPV4.match(parts[0]) and _MAC.match(parts[3].lower()) and parts[3] != "00:00:00:00:00:00":
+            arp[parts[0]] = parts[3].lower()
+    found: dict[str, dict[str, Any]] = {}
+    for line in sections["found"]:
+        kind, ip, model, hostname, firmware = (line.split("|") + [""] * 5)[:5]
+        if kind not in ("qnap", "synology") or not _IPV4.match(ip):
+            continue
+        found[ip] = {"ip": ip, "kind": kind, "model": model[:100] or None, "hostname": hostname[:100] or None,
+                     "firmware": firmware[:50] or None, "mac": arp.get(ip)}
+    device.nas_neighbors = {
+        "at": r.started_at.isoformat(), "networks": networks,
+        "found": sorted(found.values(), key=lambda f: tuple(int(x) for x in f["ip"].split("."))),
+    }
+
+
 PARSERS: dict[str, Callable[[AsyncSession, Device, ProbeResultIn, datetime], Awaitable[None]]] = {
     "veeam_vbr": _backup_parser("vbr"),
     "veeam_vaw": _backup_parser("vaw"),
     "uranium": _backup_parser("uranium"),
     "qnap_codesign": _qnap_codesign,
+    "nas_discovery": _nas_discovery,
 }
 
 

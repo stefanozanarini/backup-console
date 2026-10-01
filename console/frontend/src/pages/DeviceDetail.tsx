@@ -6,7 +6,7 @@ import { useConsole } from "../context";
 import { AGENT_STATUS_LABEL, ago, bytes, connectivity, dateTime, KIND_LABEL } from "../format";
 import CommandPanel from "../CommandPanel";
 import LineChart, { type Series } from "../LineChart";
-import type { DeviceDetail, MetricSeries, Problem, Release } from "../types";
+import type { DeviceDetail, MetricSeries, NasNeighbors, Problem, Release } from "../types";
 import { DeviceBackupWindow } from "../BackupWindow";
 import { BackupAppsSections, VeeamSection } from "../veeam";
 import VeeamCleanup from "../VeeamCleanup";
@@ -71,6 +71,7 @@ export default function DeviceDetailPage() {
         <ConnectivityBadge value={connectivity(d)} />
       </div>
       <ErrorBox error={actionError} />
+      <UnmanagedNasAlert neighbors={d.nas_neighbors} />
 
       <div className="grid-2">
         <section className="card">
@@ -146,6 +147,8 @@ export default function DeviceDetailPage() {
           )}
         </section>
       </div>
+
+      {d.nas_neighbors && <NasNeighborsSection neighbors={d.nas_neighbors} />}
 
       <section className="card">
         <h2>Problemi</h2>
@@ -346,5 +349,62 @@ function DeviceName(props: { id: string; name: string; writable: boolean; onSave
       </div>
       <ErrorBox error={error} />
     </form>
+  );
+}
+
+const NAS_KIND: Record<string, string> = { qnap: "QNAP", synology: "Synology" };
+
+function unmanaged(n: NasNeighbors | null | undefined) {
+  return (n?.found ?? []).filter((f) => !f.device_id);
+}
+
+function UnmanagedNasAlert({ neighbors }: { neighbors: NasNeighbors | null | undefined }) {
+  const missing = unmanaged(neighbors);
+  if (missing.length === 0) return null;
+  return (
+    <div className="notice warn" role="status" style={{ marginBottom: 12 }}>
+      ⚠ {missing.length === 1 ? "Un NAS nella stessa rete non è" : `${missing.length} NAS nella stessa rete non sono`} in
+      console: {missing.map((f) => f.hostname ?? f.ip).join(", ")}. <a href="#nas-rete">Dettagli</a>
+    </div>
+  );
+}
+
+function NasNeighborsSection({ neighbors }: { neighbors: NasNeighbors }) {
+  const nets = neighbors.networks.map((n) => `${n.ip}/${n.prefix ?? "?"}`).join(", ");
+  return (
+    <section className="card" id="nas-rete">
+      <h2>NAS nella stessa rete</h2>
+      <div className="muted small" style={{ marginBottom: 8 }}>
+        Ricerca giornaliera su {nets || "—"} · ultima {ago(neighbors.at)}
+      </div>
+      {neighbors.found.length === 0 ? (
+        <Empty>Nessun altro NAS trovato</Empty>
+      ) : (
+        <div className="table-wrap">
+          <table className="compact">
+            <thead>
+              <tr><th>IP</th><th>Tipo</th><th>Modello</th><th>Nome</th><th>Firmware</th><th>MAC</th><th>In console</th></tr>
+            </thead>
+            <tbody>
+              {neighbors.found.map((f) => (
+                <tr key={f.ip}>
+                  <td className="mono">{f.ip}</td>
+                  <td>{NAS_KIND[f.kind] ?? f.kind}</td>
+                  <td>{f.model ?? "—"}</td>
+                  <td>{f.hostname ?? "—"}</td>
+                  <td>{f.firmware ?? "—"}</td>
+                  <td className="mono small">{f.mac ?? "—"}</td>
+                  <td>
+                    {f.device_id
+                      ? <Link to={`/dispositivi/${f.device_id}`}>{f.device_name}</Link>
+                      : <span className="badge warning">Non aggiunto</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }

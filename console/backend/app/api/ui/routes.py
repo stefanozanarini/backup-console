@@ -258,7 +258,35 @@ async def get_device(device_id: uuid.UUID, user: CurrentUserDep, session: Sessio
     out = DeviceDetail.model_validate(device)
     if snap:
         out.inventory, out.inventory_at = snap.data, snap.collected_at
+    if device.nas_neighbors:
+        out.nas_neighbors = await _match_neighbors(session, device)
     return out
+
+
+async def _match_neighbors(session: AsyncSession, device: Device) -> dict:
+    """Collega ogni NAS trovato al dispositivo del tenant con lo stesso MAC, IP o nome host."""
+    others = (await session.scalars(
+        select(Device).where(Device.tenant_id == device.tenant_id, Device.id != device.id)
+    )).all()
+    by_mac: dict[str, Device] = {}
+    by_ip: dict[str, Device] = {}
+    by_name: dict[str, Device] = {}
+    for d in others:
+        for nic in d.ip_addresses or []:
+            if isinstance(nic, dict):
+                if nic.get("mac"):
+                    by_mac[str(nic["mac"]).lower()] = d
+                for ip in nic.get("ipv4") or []:
+                    by_ip[str(ip)] = d
+        for n in (d.hostname, d.name):
+            if n:
+                by_name[n.lower()] = d
+    found = []
+    for f in device.nas_neighbors.get("found") or []:
+        d = ((f.get("mac") and by_mac.get(f["mac"])) or by_ip.get(f.get("ip"))
+             or (f.get("hostname") and by_name.get(f["hostname"].lower())))
+        found.append({**f, "device_id": str(d.id) if d else None, "device_name": d.name if d else None})
+    return {**device.nas_neighbors, "found": found}
 
 
 @router.get("/devices/{device_id}/metrics")
