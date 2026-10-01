@@ -114,6 +114,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	if err := upgrade.OnStartup(a.cfg.DataDir, version.Version, log.Printf); err != nil {
 		return err
 	}
+	syncQPKGVersion(version.Version, execCfg, log.Printf)
 	log.Printf("bc-agent %s (%s) avviato, ruoli %v, console %s, esecuzione remota %s",
 		version.Version, upgrade.Platform(), Roles(a.collectors), a.cfg.ServerURL, onOff(a.cfg.RemoteExecAllowed()))
 
