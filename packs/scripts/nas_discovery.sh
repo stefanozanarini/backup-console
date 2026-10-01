@@ -1,5 +1,5 @@
-# Ricerca di altri NAS (QNAP, Synology) nelle sottoreti del dispositivo, una volta al
-# giorno. Per ogni indirizzo una richiesta HTTP alle pagine che i NAS espongono senza
+# Ricerca di altri NAS (QNAP, Synology) nelle sottoreti del dispositivo, ogni
+# 48 ore. Per ogni indirizzo una richiesta HTTP alle pagine che i NAS espongono senza
 # login; la console confronta il risultato con i dispositivi del tenant.
 # Output grezzo: lo interpreta la console.
 PAR=32

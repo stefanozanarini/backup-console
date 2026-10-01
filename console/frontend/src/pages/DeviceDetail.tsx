@@ -375,7 +375,7 @@ function NasNeighborsSection({ neighbors }: { neighbors: NasNeighbors }) {
     <section className="card" id="nas-rete">
       <h2>NAS nella stessa rete</h2>
       <div className="muted small" style={{ marginBottom: 8 }}>
-        Ricerca giornaliera su {nets || "—"} · ultima {ago(neighbors.at)}
+        Ricerca ogni 48 ore su {nets || "—"} · ultima {ago(neighbors.at)}
       </div>
       {neighbors.found.length === 0 ? (
         <Empty>Nessun altro NAS trovato</Empty>
