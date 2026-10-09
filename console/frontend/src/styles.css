@@ -214,6 +214,8 @@ select:focus, input:focus { outline: 2px solid var(--accent); outline-offset: -1
 .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 .btn.primary:hover { background: var(--accent-hover); }
 .btn.danger { color: var(--critical); }
+.btn.danger-solid { background: var(--critical); border-color: var(--critical); color: #fff; }
+.btn.danger-solid:hover:not(:disabled) { filter: brightness(0.92); background: var(--critical); }
 .btn.small { padding: 3px 9px; min-height: 26px; font-size: 13px; }
 .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .form-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, notifyChange, useApi } from "../api";
 import { ConnectivityBadge, CopyButton, Empty, ErrorBox, SeverityBadge, StateBadge, UsageBar } from "../components";
 import { useConsole } from "../context";
@@ -10,6 +10,7 @@ import type { DeviceDetail, MetricSeries, NasNeighbors, Problem, Release } from 
 import { DeviceBackupWindow } from "../BackupWindow";
 import { BackupAppsSections, VeeamSection } from "../veeam";
 import VeeamCleanup from "../VeeamCleanup";
+import { Modal } from "../elevation";
 
 const RANGES = [
   { hours: 24, label: "24 ore" },
@@ -68,7 +69,10 @@ export default function DeviceDetailPage() {
           <div className="sub"><Link to="/dispositivi">Dispositivi</Link> / {tenantName(d.tenant_id)}</div>
           <DeviceName id={d.id} name={d.name} writable={writable} onSaved={() => { void device.reload(); notifyChange(); }} />
         </div>
-        <ConnectivityBadge value={connectivity(d)} />
+        <div className="btn-row" style={{ alignItems: "center" }}>
+          <ConnectivityBadge value={connectivity(d)} />
+          {writable && <RemoveDevice id={d.id} name={d.name} hasAgent={!!d.agent && d.agent.status !== "revoked"} />}
+        </div>
       </div>
       <ErrorBox error={actionError} />
       <UnmanagedNasAlert neighbors={d.nas_neighbors} />
@@ -406,5 +410,59 @@ function NasNeighborsSection({ neighbors }: { neighbors: NasNeighbors }) {
         </div>
       )}
     </section>
+  );
+}
+
+function RemoveDevice({ id, name, hasAgent }: { id: string; name: string; hasAgent: boolean }) {
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+  const close = () => { if (!busy) { setOpen(false); setTyped(""); setError(null); } };
+
+  async function remove() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api(`/devices/${id}`, { method: "DELETE" });
+      notifyChange();
+      navigate("/dispositivi", { replace: true });
+    } catch (e) {
+      setError(e as Error);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <button className="btn danger small" onClick={() => setOpen(true)}>Rimuovi</button>
+      {open && (
+        <Modal title="Rimuovere il dispositivo?" onClose={close}>
+          <div className="stack">
+            <div>
+              <strong>{name}</strong> verrà eliminato dalla console insieme a problemi, metriche, storico dei backup
+              e dei comandi. L'operazione non si può annullare.
+            </div>
+            {hasAgent && (
+              <div className="notice warn">
+                L'agente installato sul dispositivo non verrà più riconosciuto e smetterà di inviare dati. Per
+                riaggiungerlo servirà un nuovo enrollment; se non serve più, disinstallalo dal dispositivo.
+              </div>
+            )}
+            <label className="field">Per confermare scrivi il nome del dispositivo
+              <input type="text" value={typed} onChange={(e) => setTyped(e.target.value)} placeholder={name} autoFocus />
+            </label>
+            <ErrorBox error={error} />
+            <div className="btn-row" style={{ justifyContent: "flex-end" }}>
+              <button className="btn" onClick={close} disabled={busy}>Annulla</button>
+              <button className="btn danger-solid" onClick={() => void remove()} disabled={busy || typed.trim() !== name}>
+                {busy ? "Rimozione…" : "Rimuovi definitivamente"}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </>
   );
 }

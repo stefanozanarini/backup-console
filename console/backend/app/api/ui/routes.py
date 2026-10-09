@@ -6,6 +6,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 from sqlalchemy import case, func, select
+from sqlalchemy import delete as sa_delete
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -241,6 +242,22 @@ async def update_device(
           ip=client_ip(request), old=old, new=name)
     await session.commit()
     return device
+
+
+@router.delete("/devices/{device_id}", status_code=204)
+async def delete_device(device_id: uuid.UUID, user: CurrentUserDep, session: SessionDep, request: Request):
+    """Rimuove il dispositivo con agente, problemi, metriche, storico e comandi (cascade nel DB).
+    Se l'agente è ancora installato non viene più riconosciuto: per riaggiungerlo serve un nuovo enrollment."""
+    device = await session.get(Device, device_id, options=[selectinload(Device.agent)])
+    if device is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "non trovato")
+    user.require_write(device.tenant_id)
+    audit(session, "device.delete", user_id=user.id, tenant_id=device.tenant_id, target=str(device.id),
+          ip=client_ip(request), name=device.name, hostname=device.hostname,
+          agent=str(device.agent.id) if device.agent else None)
+    # DELETE diretto: le tabelle collegate si svuotano con ON DELETE CASCADE.
+    await session.execute(sa_delete(Device).where(Device.id == device_id))
+    await session.commit()
 
 
 @router.get("/devices/{device_id}", response_model=DeviceDetail)

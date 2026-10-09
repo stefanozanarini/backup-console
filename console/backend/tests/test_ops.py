@@ -347,3 +347,18 @@ async def test_command_history_search_and_delete(client):
     async with SessionLocal() as s:
         a = await s.scalar(select(AuditLog).where(AuditLog.action == "command.delete"))
         assert a.details["command"] == "lss typo"
+
+
+async def test_delete_device(client):
+    data, auth = await approved_agent(client)
+    dev = data["device_id"]
+    # Dati collegati: metriche e un problema aperto.
+    await client.post("/agent/v1/metrics", headers=auth, json=envelope(
+        {"metrics": [{"name": "disk.used_pct", "labels": {"mount": "/"}, "value": 97}]}))
+    assert (await client.delete(f"/api/v1/devices/{dev}", headers=as_user())).status_code == 204
+    assert (await client.get(f"/api/v1/devices/{dev}", headers=as_user())).status_code == 404
+    assert [p for p in (await client.get("/api/v1/problems", headers=as_user())).json() if p["device_id"] == dev] == []
+    # L'agente non è più riconosciuto.
+    hb = await client.post("/agent/v1/heartbeat", json={"version": "0.3.0"}, headers=auth)
+    assert hb.status_code in (401, 403)
+    assert (await client.delete(f"/api/v1/devices/{dev}", headers=as_user())).status_code == 404
