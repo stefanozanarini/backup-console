@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { api, useApi } from "../api";
+import { api, notifyChange, useApi } from "../api";
 import { TenantBackupWindow } from "../BackupWindow";
 import { CopyButton, ErrorBox } from "../components";
 import { useConsole } from "../context";
 import { dateTime } from "../format";
 import type { EnrollmentToken, Site, Tenant, TokenInfo } from "../types";
+import { Modal } from "../elevation";
 
 export default function Tenants() {
   const { tenants, isSuperadmin, reloadTenants } = useConsole();
@@ -56,7 +57,7 @@ export default function Tenants() {
 }
 
 function TenantCard({ tenant }: { tenant: Tenant }) {
-  const { canWrite } = useConsole();
+  const { canWrite, isSuperadmin } = useConsole();
   const sites = useApi<Site[]>(`/tenants/${tenant.id}/sites`);
   const [siteName, setSiteName] = useState("");
   const [error, setError] = useState<Error | null>(null);
@@ -76,7 +77,10 @@ function TenantCard({ tenant }: { tenant: Tenant }) {
 
   return (
     <section className="card">
-      <h2>{tenant.name} <span className="chip mono">{tenant.slug}</span></h2>
+      <div className="card-head">
+        <h2>{tenant.name} <span className="chip mono">{tenant.slug}</span></h2>
+        {isSuperadmin && <RemoveTenant tenant={tenant} />}
+      </div>
       <ErrorBox error={sites.error ?? error} />
       {(sites.data ?? []).map((s) => <SiteRow key={s.id} site={s} writable={writable} />)}
       <TenantBackupWindow tenantId={tenant.id} writable={writable} />
@@ -270,5 +274,54 @@ function NewTokenForm(props: { siteId: string; onCancel: () => void; onCreated: 
         <button type="submit" className="btn primary">Genera token</button>
       </div>
     </form>
+  );
+}
+
+function RemoveTenant({ tenant }: { tenant: Tenant }) {
+  const { reloadTenants } = useConsole();
+  const [open, setOpen] = useState(false);
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+  const close = () => { if (!busy) { setOpen(false); setTyped(""); setError(null); } };
+
+  async function remove() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api(`/tenants/${tenant.id}`, { method: "DELETE" });
+      notifyChange();
+      await reloadTenants();
+    } catch (e) {
+      setError(e as Error);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <button className="btn danger small" onClick={() => setOpen(true)}>Elimina tenant</button>
+      {open && (
+        <Modal title="Eliminare il tenant?" onClose={close}>
+          <div className="stack">
+            <div>
+              <strong>{tenant.name}</strong> verrà eliminato insieme ai suoi siti, ai token di enrollment e ai permessi
+              degli utenti su questo tenant. L'operazione non si può annullare.
+            </div>
+            <div className="notice">Si possono eliminare solo i tenant senza dispositivi: se ne ha, rimuovili prima dalla loro pagina.</div>
+            <label className="field">Per confermare scrivi il nome del tenant
+              <input type="text" value={typed} onChange={(e) => setTyped(e.target.value)} placeholder={tenant.name} autoFocus />
+            </label>
+            <ErrorBox error={error} />
+            <div className="btn-row" style={{ justifyContent: "flex-end" }}>
+              <button className="btn" onClick={close} disabled={busy}>Annulla</button>
+              <button className="btn danger-solid" onClick={() => void remove()} disabled={busy || typed.trim() !== tenant.name}>
+                {busy ? "Eliminazione…" : "Elimina definitivamente"}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </>
   );
 }

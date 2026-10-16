@@ -362,3 +362,17 @@ async def test_delete_device(client):
     hb = await client.post("/agent/v1/heartbeat", json={"version": "0.3.0"}, headers=auth)
     assert hb.status_code in (401, 403)
     assert (await client.delete(f"/api/v1/devices/{dev}", headers=as_user())).status_code == 404
+
+
+async def test_delete_tenant_only_without_devices(client):
+    data, _ = await approved_agent(client)
+    from app.db import SessionLocal
+    from app.models import Device
+    async with SessionLocal() as s:
+        tid = str((await s.get(Device, data["device_id"])).tenant_id)
+    r = await client.delete(f"/api/v1/tenants/{tid}", headers=as_user())
+    assert r.status_code == 409 and "dispositivi" in r.json()["detail"]
+    assert (await client.delete(f"/api/v1/devices/{data['device_id']}", headers=as_user())).status_code == 204
+    assert (await client.delete(f"/api/v1/tenants/{tid}", headers=as_user())).status_code == 204
+    assert tid not in [t["id"] for t in (await client.get("/api/v1/tenants", headers=as_user())).json()]
+    assert (await client.delete(f"/api/v1/tenants/{tid}", headers=as_user())).status_code == 404

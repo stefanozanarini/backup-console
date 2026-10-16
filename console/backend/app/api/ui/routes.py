@@ -127,6 +127,25 @@ async def create_tenant(body: TenantCreate, user: CurrentUserDep, session: Sessi
     return tenant
 
 
+@router.delete("/tenants/{tenant_id}", status_code=204)
+async def delete_tenant(tenant_id: uuid.UUID, user: CurrentUserDep, session: SessionDep, request: Request):
+    """Rimuove un tenant senza dispositivi, con siti, token di enrollment e ruoli degli utenti su di esso.
+    Un tenant con dispositivi non si elimina: prima vanno rimossi i dispositivi."""
+    user.require_superadmin()
+    tenant = await session.get(Tenant, tenant_id)
+    if tenant is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "non trovato")
+    devices = await session.scalar(select(func.count()).select_from(Device).where(Device.tenant_id == tenant_id))
+    if devices:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            f"il tenant ha {devices} dispositivi: rimuovili prima di eliminare il tenant")
+    # tenant_id dell'audit diventa NULL con il tenant: nome e slug restano nei dettagli.
+    audit(session, "tenant.delete", user_id=user.id, target=tenant.slug, ip=client_ip(request),
+          tenant=str(tenant.id), name=tenant.name)
+    await session.execute(sa_delete(Tenant).where(Tenant.id == tenant_id))
+    await session.commit()
+
+
 @router.get("/tenants/{tenant_id}/sites", response_model=list[SiteOut])
 async def list_sites(tenant_id: uuid.UUID, user: CurrentUserDep, session: SessionDep):
     user.require_read(tenant_id)
