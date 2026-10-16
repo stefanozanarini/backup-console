@@ -14,6 +14,7 @@ import Problems from "./pages/Problems";
 import Tenants from "./pages/Tenants";
 import Upgrades from "./pages/Upgrades";
 import type { Device, Me, Tenant, TenantSummary } from "./types";
+import { hideQuery, useHideUranium } from "./prefs";
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -93,7 +94,8 @@ export default function App() {
 }
 
 function Sidebar() {
-  const { data: summary } = useApi<TenantSummary[]>("/problems/summary", 30000);
+  const [hideUranium] = useHideUranium();
+  const { data: summary } = useApi<TenantSummary[]>(`/problems/summary?${hideQuery(hideUranium)}`, 30000);
   const { data: pending } = useApi<Device[]>("/devices?agent_status=pending", 30000);
   const critical = summary?.reduce((n, s) => n + s.critical, 0) ?? 0;
   const total = summary?.reduce((n, s) => n + s.critical + s.warning, 0) ?? 0;

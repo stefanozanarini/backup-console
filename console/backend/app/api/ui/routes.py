@@ -1,7 +1,7 @@
 import secrets
 import uuid
 from datetime import timedelta
-from typing import Any
+from typing import Any, Literal
 from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
@@ -391,10 +391,24 @@ async def revoke_agent(agent_id: uuid.UUID, user: CurrentUserDep, session: Sessi
 # --- problemi (vista unica trasversale ai tenant) -------------------------
 
 
+HideProducts = Annotated[list[Literal["uranium"]] | None, Query()]
+
+
+def _hidden(stmt, hide: list[str] | None):
+    """Esclude i problemi dei prodotti nascosti dall'operatore (job e raccolta dati di quel software)."""
+    for product in hide or []:
+        stmt = stmt.where(
+            func.coalesce(Problem.details["job_key"].astext, "").not_like(f"{product}:%"),
+            func.coalesce(Problem.details["collector"].astext, "") != product,
+        )
+    return stmt
+
+
 @router.get("/problems", response_model=list[ProblemRow])
 async def list_problems(
     user: CurrentUserDep,
     session: SessionDep,
+    hide: HideProducts = None,
     tenant_id: uuid.UUID | None = None,
     device_id: uuid.UUID | None = None,
     state: Annotated[list[ProblemState] | None, Query()] = None,
@@ -417,6 +431,7 @@ async def list_problems(
         stmt = stmt.where(Problem.device_id == device_id)
     if severity:
         stmt = stmt.where(Problem.severity == severity)
+    stmt = _hidden(stmt, hide)
     rows = (await session.execute(stmt)).all()
     return [
         ProblemRow(**ProblemOut.model_validate(p).model_dump(), tenant_name=tn, device_name=dn)
@@ -425,7 +440,7 @@ async def list_problems(
 
 
 @router.get("/problems/summary")
-async def problems_summary(user: CurrentUserDep, session: SessionDep):
+async def problems_summary(user: CurrentUserDep, session: SessionDep, hide: HideProducts = None):
     """Conteggio problemi aperti per tenant e gravità, per la dashboard."""
     stmt = (
         _scoped(select(Tenant.id, Tenant.name, Problem.severity, func.count()), Problem.tenant_id, user)
@@ -433,6 +448,7 @@ async def problems_summary(user: CurrentUserDep, session: SessionDep):
         .where(Problem.state != ProblemState.RESOLVED)
         .group_by(Tenant.id, Tenant.name, Problem.severity)
     )
+    stmt = _hidden(stmt, hide)
     out: dict[str, dict] = {}
     for tid, name, sev, n in (await session.execute(stmt)).all():
         row = out.setdefault(str(tid), {"tenant_id": tid, "tenant_name": name, "warning": 0, "critical": 0})

@@ -199,6 +199,7 @@ td.muted { color: var(--text-3); }
 
 /* --- controlli ----------------------------------------------------------- */
 .filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; align-items: center; }
+.check-filter { display: inline-flex; align-items: center; gap: 6px; padding: 0 6px; color: var(--text-2); cursor: pointer; user-select: none; }
 select, input[type="text"], input[type="email"], input[type="search"], input[type="number"] {
   font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border);
   border-radius: 6px; padding: 6px 10px; min-height: 32px;

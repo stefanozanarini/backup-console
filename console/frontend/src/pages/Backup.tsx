@@ -6,6 +6,8 @@ import { useConsole } from "../context";
 import { ago, bytes, dateTime } from "../format";
 import type { VeeamJob } from "../types";
 import { HistoryStrip, HistoryTable, VeeamResultBadge, VeeamRunningBadge } from "../veeam";
+import { useHideUranium } from "../prefs";
+import { HideUraniumToggle } from "./Problems";
 
 const PRODUCT_CHIP: Record<string, string> = { vbr: "B&R", vaw: "Agent", uranium: "Uranium", hyperbackup: "Hyper Backup" };
 
@@ -22,16 +24,18 @@ export default function Backup() {
   const tenant = params.get("tenant") ?? "";
   const result = (params.get("result") ?? "") as Bucket | "";
   const [open, setOpen] = useState<string | null>(null);
-  const { data, error } = useApi<VeeamJob[]>(`/veeam/jobs${tenant ? `?tenant_id=${tenant}` : ""}`, 60000);
+  const { data: all, error } = useApi<VeeamJob[]>(`/veeam/jobs${tenant ? `?tenant_id=${tenant}` : ""}`, 60000);
+  const [hideUranium, setHideUranium] = useHideUranium();
+  const data = useMemo(() => (all ?? []).filter((j) => !hideUranium || j.product !== "uranium"), [all, hideUranium]);
 
   const counts = useMemo(() => {
     const c: Record<Bucket, number> = { success: 0, warning: 0, failed: 0, none: 0 };
-    for (const j of data ?? []) if (j.enabled) c[bucket(j)]++;
+    for (const j of data) if (j.enabled) c[bucket(j)]++;
     return c;
   }, [data]);
   // Prima quello che richiede attenzione.
   const order: Record<Bucket, number> = { failed: 0, warning: 1, none: 2, success: 3 };
-  const rows = (data ?? [])
+  const rows = data
     .filter((j) => !result || (j.enabled && bucket(j) === result))
     .sort((a, b) => Number(!a.enabled) - Number(!b.enabled) || order[bucket(a)] - order[bucket(b)]);
 
@@ -71,6 +75,7 @@ export default function Backup() {
           <option value="">Tutti i tenant</option>
           {tenants.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
         </select>
+        <HideUraniumToggle value={hideUranium} onChange={setHideUranium} />
       </div>
       <ErrorBox error={error} />
       <div className="table-wrap">
@@ -108,7 +113,7 @@ export default function Backup() {
             ))}
           </tbody>
         </table>
-        {data && rows.length === 0 && <Empty>Nessun job</Empty>}
+        {all && rows.length === 0 && <Empty>Nessun job</Empty>}
       </div>
     </>
   );

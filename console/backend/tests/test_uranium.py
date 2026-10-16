@@ -86,3 +86,26 @@ async def test_hyperbackup(client):
     assert (await client.get("/api/v1/problems", headers=as_user())).json() == []
     bad = envelope({"product": "hyperbackup", "jobs": [], "errors": []})
     assert (await client.post("/agent/v1/veeam", headers=auth, json=bad)).status_code == 422
+
+
+async def test_hide_uranium_problems(client):
+    from app.db import SessionLocal
+    from app.models import Device, Severity
+    from app.services.problems import raise_problem
+
+    data, _ = await approved_agent(client, roles=("uranium",))
+    async with SessionLocal() as s:
+        d = await s.get(Device, data["device_id"])
+        await raise_problem(s, d, "veeam.job_result", Severity.CRITICAL, "Uranium fallito", {"job": "u"}, {"job_key": "uranium:Set1.bks"})
+        await raise_problem(s, d, "agent.collector", Severity.WARNING, "Raccolta Uranium", {"collector": "uranium"}, {"collector": "uranium"})
+        await raise_problem(s, d, "veeam.job_result", Severity.CRITICAL, "VBR fallito", {"job": "v"}, {"job_key": "abc"})
+        await s.commit()
+    dev = data["device_id"]
+    mine = lambda rows: sorted(p["title"] for p in rows if p["device_id"] == dev)  # noqa: E731
+    assert mine((await client.get("/api/v1/problems", headers=as_user())).json()) == ["Raccolta Uranium", "Uranium fallito", "VBR fallito"]
+    assert mine((await client.get("/api/v1/problems?hide=uranium", headers=as_user())).json()) == ["VBR fallito"]
+    full = {r["tenant_id"]: r for r in (await client.get("/api/v1/problems/summary", headers=as_user())).json()}
+    hidden = {r["tenant_id"]: r for r in (await client.get("/api/v1/problems/summary?hide=uranium", headers=as_user())).json()}
+    t = next(k for k, r in full.items() if r["critical"] == 2 and r["warning"] == 1)
+    assert hidden[t]["critical"] == 1 and hidden[t]["warning"] == 0
+    assert (await client.get("/api/v1/problems?hide=altro", headers=as_user())).status_code == 422

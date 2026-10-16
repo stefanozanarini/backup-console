@@ -6,6 +6,7 @@ import { useConsole } from "../context";
 import { ago, dateTime } from "../format";
 import type { Problem, TenantSummary } from "../types";
 import { JobStartButton } from "../veeam";
+import { hideQuery, useHideUranium } from "../prefs";
 
 const STATE_FILTERS = {
   open: "state=open",
@@ -20,12 +21,13 @@ export default function Problems() {
   const severity = params.get("severity") ?? "";
   const state: StateFilter = params.get("state") === "resolved" ? "resolved" : "open";
   const [open, setOpen] = useState<string | null>(null);
+  const [hideUranium, setHideUranium] = useHideUranium();
 
-  const q = [STATE_FILTERS[state], tenant && `tenant_id=${tenant}`, severity && `severity=${severity}`]
+  const q = [STATE_FILTERS[state], tenant && `tenant_id=${tenant}`, severity && `severity=${severity}`, hideQuery(hideUranium)]
     .filter(Boolean)
     .join("&");
   const problems = useApi<Problem[]>(`/problems?${q}`, 30000);
-  const summary = useApi<TenantSummary[]>("/problems/summary", 30000);
+  const summary = useApi<TenantSummary[]>(`/problems/summary?${hideQuery(hideUranium)}`, 30000);
 
   function setFilter(key: string, value: string) {
     const next = new URLSearchParams(params);
@@ -75,6 +77,7 @@ export default function Problems() {
           <option value="open">Aperti</option>
           <option value="resolved">Risolti</option>
         </select>
+        <HideUraniumToggle value={hideUranium} onChange={setHideUranium} />
       </div>
 
       <ErrorBox error={problems.error} />
@@ -241,5 +244,14 @@ function SummaryTile(props: { name: string; critical: number; warning: number; s
         </div>
       </div>
     </button>
+  );
+}
+
+export function HideUraniumToggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <label className="check-filter" title="Preferenza salvata in questo browser">
+      <input type="checkbox" checked={value} onChange={(e) => onChange(e.target.checked)} />
+      Nascondi Uranium Backup
+    </label>
   );
 }
