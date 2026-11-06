@@ -158,7 +158,13 @@ function installCommands(server: string, token: string) {
     // fine: non si concatena con &&, si controlla dopo che il pacchetto risulti installato.
     `sh /tmp/bc-agent.qpkg; rm -f /tmp/bc-agent.qpkg\n` +
     `D="$(/sbin/getcfg BackupConsoleAgent Install_Path -f /etc/config/qpkg.conf)"\n` +
-    `if [ -n "$D" ]; then sh "$D/bc-agent.sh" enroll -server "$S" -token "$T"; else echo "pacchetto non installato"; fi`;
+    `if [ -n "$D" ]; then sh "$D/bc-agent.sh" enroll -server "$S" -token "$T"; else echo "pacchetto non installato"; fi\n` +
+    // Su alcuni QTS App Center disattiva il QPKG non firmato anche con le app non firmate
+    // consentite: ogni 5 minuti cron lo riabilita e lo riavvia se è fermo. La riga sta in
+    // /etc/config/crontab (persistente) e non fa nulla se il pacchetto è stato rimosso.
+    `W='*/5 * * * * D=$(/sbin/getcfg BackupConsoleAgent Install_Path -f /etc/config/qpkg.conf); [ -n "$D" ] && [ -f "$D/etc/agent.json" ] && { sh "$D/bc-agent.sh" status >/dev/null 2>&1 || { /sbin/setcfg BackupConsoleAgent Enable TRUE -f /etc/config/qpkg.conf; sh "$D/bc-agent.sh" start >/dev/null 2>&1; }; } # bc-agent watchdog'\n` +
+    `{ grep -v "bc-agent watchdog" /etc/config/crontab; echo "$W"; } > /tmp/bc-cron && cat /tmp/bc-cron > /etc/config/crontab && rm -f /tmp/bc-cron\n` +
+    `crontab /etc/config/crontab && /etc/init.d/crond.sh restart >/dev/null 2>&1`;
   const synology =
     `# SSH sul NAS con un amministratore, poi "sudo -i". Installa in /usr/local/bc-agent con un servizio systemd.\n` +
     `T='${token}'; S='${server}'\n` +
