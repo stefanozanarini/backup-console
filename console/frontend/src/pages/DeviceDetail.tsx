@@ -6,11 +6,12 @@ import { useConsole } from "../context";
 import { AGENT_STATUS_LABEL, ago, bytes, connectivity, dateTime, KIND_LABEL } from "../format";
 import CommandPanel from "../CommandPanel";
 import LineChart, { type Series } from "../LineChart";
-import type { DeviceDetail, MetricSeries, NasNeighbors, Problem, Release } from "../types";
+import type { DeviceDetail, MetricSeries, NasNeighbors, Problem, Release, Site } from "../types";
 import { DeviceBackupWindow } from "../BackupWindow";
 import { BackupAppsSections, VeeamSection } from "../veeam";
 import VeeamCleanup from "../VeeamCleanup";
 import { Modal } from "../elevation";
+import { HOLDING_SLUG } from "./Tenants";
 
 const RANGES = [
   { hours: 24, label: "24 ore" },
@@ -20,7 +21,8 @@ const RANGES = [
 
 export default function DeviceDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { tenantName, canWrite, isSuperadmin } = useConsole();
+  const { tenantName, canWrite, isSuperadmin, tenants } = useConsole();
+  const tenantSlug = (id: string) => tenants.find((t) => t.id === id)?.slug;
   const [hours, setHours] = useState(24 * 7);
   const [actionError, setActionError] = useState<Error | null>(null);
 
@@ -71,10 +73,16 @@ export default function DeviceDetailPage() {
         </div>
         <div className="btn-row" style={{ alignItems: "center" }}>
           <ConnectivityBadge value={connectivity(d)} />
+          {writable && <MoveDevice device={d} onMoved={() => { void device.reload(); notifyChange(); }} />}
           {writable && <RemoveDevice id={d.id} name={d.name} hasAgent={!!d.agent && d.agent.status !== "revoked"} />}
         </div>
       </div>
       <ErrorBox error={actionError} />
+      {tenantSlug(d.tenant_id) === HOLDING_SLUG && (
+        <div className="notice warn" style={{ marginBottom: 12 }}>
+          Dispositivo installato con un token generico: usa «Sposta» per assegnarlo al tenant e alla sede giusti.
+        </div>
+      )}
       <UnmanagedNasAlert neighbors={d.nas_neighbors} />
 
       <div className="grid-2">
@@ -458,6 +466,70 @@ function RemoveDevice({ id, name, hasAgent }: { id: string; name: string; hasAge
               <button className="btn" onClick={close} disabled={busy}>Annulla</button>
               <button className="btn danger-solid" onClick={() => void remove()} disabled={busy || typed.trim() !== name}>
                 {busy ? "Rimozione…" : "Rimuovi definitivamente"}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </>
+  );
+}
+
+function MoveDevice({ device, onMoved }: { device: DeviceDetail; onMoved: () => void }) {
+  const { tenants, canWrite } = useConsole();
+  const targets = tenants.filter((t) => t.slug !== HOLDING_SLUG && canWrite(t.id));
+  const [open, setOpen] = useState(false);
+  const [tenantId, setTenantId] = useState("");
+  const [siteId, setSiteId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+  const sites = useApi<Site[]>(open && tenantId ? `/tenants/${tenantId}/sites` : null);
+  const close = () => { if (!busy) { setOpen(false); setTenantId(""); setSiteId(""); setError(null); } };
+
+  async function move() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api(`/devices/${device.id}/move`, { method: "POST", body: { site_id: siteId } });
+      setBusy(false);
+      setOpen(false);
+      setTenantId("");
+      setSiteId("");
+      onMoved();
+    } catch (e) {
+      setError(e as Error);
+      setBusy(false);
+    }
+  }
+
+  const options = (sites.data ?? []).filter((s) => s.id !== device.site_id);
+  return (
+    <>
+      <button className="btn small" onClick={() => setOpen(true)}>Sposta</button>
+      {open && (
+        <Modal title="Spostare il dispositivo?" onClose={close}>
+          <div className="stack">
+            <div>
+              <strong>{device.name}</strong> passerà al tenant e alla sede scelti, con problemi, storico dei backup,
+              metriche e comandi. L'agente continua a funzionare senza reinstallazioni.
+            </div>
+            <label className="field">Tenant
+              <select value={tenantId} onChange={(e) => { setTenantId(e.target.value); setSiteId(""); }} autoFocus>
+                <option value="">Scegli il tenant…</option>
+                {targets.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            </label>
+            <label className="field">Sede
+              <select value={siteId} onChange={(e) => setSiteId(e.target.value)} disabled={!tenantId}>
+                <option value="">{tenantId && sites.data && options.length === 0 ? "Nessuna sede: creala in Tenant e siti" : "Scegli la sede…"}</option>
+                {options.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </label>
+            <ErrorBox error={error ?? sites.error} />
+            <div className="btn-row" style={{ justifyContent: "flex-end" }}>
+              <button className="btn" onClick={close} disabled={busy}>Annulla</button>
+              <button className="btn primary" onClick={() => void move()} disabled={busy || !siteId}>
+                {busy ? "Spostamento…" : "Sposta"}
               </button>
             </div>
           </div>

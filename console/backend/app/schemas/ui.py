@@ -58,6 +58,15 @@ class SiteOut(ORM):
     name: str
 
 
+class DeviceMove(BaseModel):
+    site_id: uuid.UUID
+
+
+class HoldingOut(BaseModel):
+    tenant_id: uuid.UUID
+    site_id: uuid.UUID
+
+
 class TokenCreate(BaseModel):
     note: str | None = Field(default=None, max_length=200)
     # 1 = singolo dispositivo; >1 per rollout via GPO/Intune/script.

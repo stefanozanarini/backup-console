@@ -2,6 +2,7 @@ import base64
 import hashlib
 import json
 import time
+import uuid
 from datetime import UTC, datetime, timedelta
 
 from cryptography.hazmat.primitives import serialization
@@ -9,7 +10,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from app.services import totp
 from tests.conftest import as_user
-from tests.test_agent_flow import enroll, envelope, setup_site
+from tests.test_agent_flow import disk, enroll, envelope, setup_site
 
 
 def test_totp_rfc6238_vector():
@@ -376,3 +377,35 @@ async def test_delete_tenant_only_without_devices(client):
     assert (await client.delete(f"/api/v1/tenants/{tid}", headers=as_user())).status_code == 204
     assert tid not in [t["id"] for t in (await client.get("/api/v1/tenants", headers=as_user())).json()]
     assert (await client.delete(f"/api/v1/tenants/{tid}", headers=as_user())).status_code == 404
+
+
+async def test_generic_token_and_move_device(client):
+    from sqlalchemy import select
+
+    from app.db import SessionLocal
+    from app.models import Metric, Problem, VeeamJob
+
+    h = (await client.post("/api/v1/holding", headers=as_user())).json()
+    assert (await client.post("/api/v1/holding", headers=as_user())).json() == h  # idempotente
+    tenants = (await client.get("/api/v1/tenants", headers=as_user())).json()
+    assert any(t["id"] == h["tenant_id"] and t["slug"] == "da-assegnare" for t in tenants)
+
+    # Installazione con un token generico: il dispositivo finisce in "Da assegnare".
+    data, auth, _, _ = await enroll(client, h["site_id"], roles=("veeam_vbr",))
+    await client.post(f"/api/v1/agents/{data['agent_id']}/approve", headers=as_user())
+    dev = data["device_id"]
+    assert (await client.post("/agent/v1/metrics", headers=auth, json=disk(50))).status_code == 200
+    await client.post("/agent/v1/veeam", headers=auth, json=veeam_report([job("j1", "Failed")]))
+
+    # Destinazione: un tenant e una sede veri.
+    _, site_id = await setup_site(client, slug="cliente-vero")
+    r = await client.post(f"/api/v1/devices/{dev}/move", json={"site_id": site_id}, headers=as_user())
+    assert r.status_code == 200, r.text
+    d = (await client.get(f"/api/v1/devices/{dev}", headers=as_user())).json()
+    assert d["site_id"] == site_id and d["tenant_id"] != h["tenant_id"]
+    async with SessionLocal() as s:
+        for model in (Problem, VeeamJob, Metric):
+            tids = set((await s.scalars(select(model.tenant_id).where(model.device_id == dev))).all())
+            assert tids == {uuid.UUID(d["tenant_id"])}, model
+    # L'agente continua a funzionare dopo lo spostamento.
+    assert (await client.post("/agent/v1/heartbeat", json={"version": "0.3.0"}, headers=auth)).status_code == 200

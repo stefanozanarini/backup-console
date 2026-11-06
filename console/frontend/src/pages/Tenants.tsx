@@ -51,8 +51,41 @@ export default function Tenants() {
           <button className="btn primary" type="submit">Nuovo tenant</button>
         </form>
       )}
-      {tenants.map((t) => <TenantCard key={t.id} tenant={t} />)}
+      {isSuperadmin && !tenants.some((t) => t.slug === HOLDING_SLUG) && <EnableHolding onDone={reloadTenants} />}
+      {[...tenants]
+        .sort((a, b) => Number(b.slug === HOLDING_SLUG) - Number(a.slug === HOLDING_SLUG))
+        .map((t) => <TenantCard key={t.id} tenant={t} />)}
     </>
+  );
+}
+
+export const HOLDING_SLUG = "da-assegnare";
+
+function EnableHolding({ onDone }: { onDone: () => Promise<void> }) {
+  const [error, setError] = useState<Error | null>(null);
+  async function enable() {
+    setError(null);
+    try {
+      await api("/holding", { method: "POST" });
+      await onDone();
+    } catch (e) {
+      setError(e as Error);
+    }
+  }
+  return (
+    <section className="card" style={{ marginBottom: 16 }}>
+      <div className="card-head">
+        <div>
+          <h2>Token generici</h2>
+          <div className="muted">
+            Per installare un agente quando non sai ancora a quale cliente o sede appartiene: il dispositivo finisce nel
+            tenant «Da assegnare» e da lì lo sposti dalla sua pagina.
+          </div>
+        </div>
+        <button className="btn primary" onClick={() => void enable()}>Abilita</button>
+      </div>
+      <ErrorBox error={error} />
+    </section>
   );
 }
 
@@ -81,6 +114,12 @@ function TenantCard({ tenant }: { tenant: Tenant }) {
         <h2>{tenant.name} <span className="chip mono">{tenant.slug}</span></h2>
         {isSuperadmin && <RemoveTenant tenant={tenant} />}
       </div>
+      {tenant.slug === HOLDING_SLUG && (
+        <div className="notice" style={{ marginBottom: 12 }}>
+          Token generici: i dispositivi installati con questi token arrivano qui. Approvali e spostali sul tenant e sulla
+          sede giusti con «Sposta» nella pagina del dispositivo.
+        </div>
+      )}
       <ErrorBox error={sites.error ?? error} />
       {(sites.data ?? []).map((s) => <SiteRow key={s.id} site={s} writable={writable} />)}
       <TenantBackupWindow tenantId={tenant.id} writable={writable} />

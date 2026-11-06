@@ -36,7 +36,9 @@ from app.schemas.ui import (
     BackupWindowIn,
     BackupWindowState,
     DeviceDetail,
+    DeviceMove,
     DeviceOut,
+    HoldingOut,
     DeviceUpdate,
     MeOut,
     ProblemOut,
@@ -51,7 +53,7 @@ from app.schemas.ui import (
     TokenOut,
     UserCreate,
 )
-from app.services import backup_window
+from app.services import backup_window, holding
 from app.services.audit import audit
 
 router = APIRouter(prefix="/api/v1", tags=["console"])
@@ -144,6 +146,18 @@ async def delete_tenant(tenant_id: uuid.UUID, user: CurrentUserDep, session: Ses
           tenant=str(tenant.id), name=tenant.name)
     await session.execute(sa_delete(Tenant).where(Tenant.id == tenant_id))
     await session.commit()
+
+
+@router.post("/holding", response_model=HoldingOut)
+async def enable_holding(user: CurrentUserDep, session: SessionDep, request: Request):
+    """Crea (se manca) il tenant "Da assegnare", dove si generano i token generici."""
+    user.require_superadmin()
+    tenant, site, created = await holding.get_or_create(session)
+    if created:
+        audit(session, "tenant.create", user_id=user.id, tenant_id=tenant.id, target=tenant.slug,
+              ip=client_ip(request), holding=True)
+    await session.commit()
+    return HoldingOut(tenant_id=tenant.id, site_id=site.id)
 
 
 @router.get("/tenants/{tenant_id}/sites", response_model=list[SiteOut])
@@ -261,6 +275,29 @@ async def update_device(
           ip=client_ip(request), old=old, new=name)
     await session.commit()
     return device
+
+
+@router.post("/devices/{device_id}/move", response_model=DeviceOut)
+async def move_device(
+    device_id: uuid.UUID, body: DeviceMove, user: CurrentUserDep, session: SessionDep, request: Request
+):
+    """Sposta il dispositivo su un'altra sede (anche di un altro tenant) con tutto il suo storico."""
+    device = await session.get(Device, device_id, options=[selectinload(Device.agent)])
+    site = await session.get(Site, body.site_id)
+    if device is None or site is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "non trovato")
+    user.require_write(device.tenant_id)
+    user.require_write(site.tenant_id)
+    if site.id == device.site_id:
+        return device
+    old_tenant, old_site = device.tenant_id, device.site_id
+    await holding.move_device(session, device, site)
+    for tid in {old_tenant, site.tenant_id}:
+        audit(session, "device.move", user_id=user.id, tenant_id=tid, target=str(device.id), ip=client_ip(request),
+              name=device.name, from_tenant=str(old_tenant), from_site=str(old_site),
+              to_tenant=str(site.tenant_id), to_site=str(site.id))
+    await session.commit()
+    return await session.get(Device, device_id, options=[selectinload(Device.agent)], populate_existing=True)
 
 
 @router.delete("/devices/{device_id}", status_code=204)
